@@ -244,7 +244,7 @@ function parseLine(line: string, ctx: ParseContext, symbols: SymbolEntry[]): voi
   if (/^using\s+namespace\s+/.test(s)) {
     const m = s.match(/^using\s+namespace\s+([\w:]+)/);
     if (m) {
-      symbols.push(makeSym(ctx, "using namespace " + m[1], "namespace_alias", undefined, undefined, s));
+      symbols.push(makeSym(ctx, "using namespace " + m[1], "namespaceAlias", undefined, undefined, s));
     }
     return;
   }
@@ -379,7 +379,7 @@ function parseTemplateDeclaration(s: string, ctx: ParseContext, symbols: SymbolE
   if (isFunctionish(stripped)) {
     const nameMatch = extractFunctionName(stripped);
     if (nameMatch) {
-      symbols.push(makeSym(ctx, nameMatch, "function_template", templateParams, undefined, s));
+      symbols.push(makeSym(ctx, nameMatch, "functionTemplate", templateParams, undefined, s));
       return;
     }
   }
@@ -394,13 +394,13 @@ function parseTemplateDeclaration(s: string, ctx: ParseContext, symbols: SymbolE
 
   const varMatch = remainder.match(/^(?:(?:inline|constexpr|constinit|static|thread_local|volatile|extern)\s+)*(.+?)\s+(\w+)\s*(?:=|;)/);
   if (varMatch) {
-    symbols.push(makeSym(ctx, varMatch[2], "variable_template", templateParams, varMatch[1].trim(), s));
+    symbols.push(makeSym(ctx, varMatch[2], "variableTemplate", templateParams, varMatch[1].trim(), s));
     return;
   }
 
   const lastIdent = extractLastIdentifier(remainder);
   if (lastIdent) {
-    symbols.push(makeSym(ctx, lastIdent, "function_template", templateParams, undefined, s));
+    symbols.push(makeSym(ctx, lastIdent, "functionTemplate", templateParams, undefined, s));
   }
 }
 
@@ -426,17 +426,17 @@ function parseEnum(
   const m = s.match(/^enum\s+(class\s+|struct\s+)?(\w+)/);
   if (m) {
     const isScoped = !!m[1];
-    symbols.push(makeSym(ctx, m[2], isScoped ? "enum_class" : "enum", templateParams, undefined, s));
+    symbols.push(makeSym(ctx, m[2], "enum", templateParams, undefined, s));
   }
 }
 
 function parseTypedef(s: string, ctx: ParseContext, symbols: SymbolEntry[]): void {
   const m = s.match(/^typedef\s+.*\s+(\w+)\s*;/);
   if (m) {
-    symbols.push(makeSym(ctx, m[1], "typedef", undefined, undefined, s));
+    symbols.push(makeSym(ctx, m[1], "typeAlias", undefined, undefined, s));
   } else {
     const lastId = extractLastIdentifier(s.replace(/;$/, ""));
-    if (lastId) symbols.push(makeSym(ctx, lastId, "typedef", undefined, undefined, s));
+    if (lastId) symbols.push(makeSym(ctx, lastId, "typeAlias", undefined, undefined, s));
   }
 }
 
@@ -449,7 +449,7 @@ function parseTypeAlias(
   const m = s.match(/^using\s+(\w+)\s*=\s*/);
   if (m) {
     const rhs = s.replace(/^using\s+\w+\s*=\s*/, "").replace(/;$/, "").trim();
-    const kind: SymbolKind = templateParams ? "variable_template" : "type_alias";
+    const kind: SymbolKind = templateParams ? "variableTemplate" : "typeAlias";
     symbols.push(makeSym(ctx, m[1], kind, templateParams, rhs, s));
   }
 }
@@ -463,7 +463,7 @@ function parseUsingDecl(
   const m = s.match(/^using\s+([\w:]+)/);
   if (m) {
     const name = m[1].includes("::") ? m[1].split("::").pop()! : m[1];
-    symbols.push(makeSym(ctx, name, "using_declaration", templateParams, undefined, s));
+    symbols.push(makeSym(ctx, name, "usingDeclaration", templateParams, undefined, s));
   }
 }
 
@@ -516,7 +516,7 @@ function parseOperator(
     opName = "operator";
   }
 
-  const kind: SymbolKind = templateParams ? "function_template" : "operator";
+  const kind: SymbolKind = templateParams ? "functionTemplate" : "operator";
   symbols.push(makeSym(ctx, opName, kind, templateParams, undefined, s));
 }
 
@@ -637,8 +637,8 @@ function guessKind(s: string): SymbolKind {
   if (/^(class|struct|union)\s/.test(s)) return "class";
   if (/^enum/.test(s)) return "enum";
   if (/^concept\s/.test(s)) return "concept";
-  if (/^typedef\s/.test(s)) return "typedef";
-  if (/^using\s/.test(s)) return "type_alias";
+  if (/^typedef\s/.test(s)) return "typeAlias";
+  if (/^using\s/.test(s)) return "typeAlias";
   if (/#define/.test(s)) return "macro";
   if (/operator/.test(s)) return "operator";
   if (/\(/.test(s) && !/=\s*\[/.test(s)) return "function";

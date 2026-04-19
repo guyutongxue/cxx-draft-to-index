@@ -57,7 +57,7 @@ function extractFromSingleFile(
     const headerName = findHeaderMarker(lines, i);
     if (!headerName) continue;
 
-    const codeStart = findNextCodeblock(lines, i + 1, 50);
+    const codeStart = findNextCodeblock(lines, i + 1);
     if (codeStart === null) continue;
 
     const codeEnd = findCodeblockEnd(lines, codeStart);
@@ -80,6 +80,8 @@ function findHeaderMarker(lines: string[], lineIdx: number): string | null {
   const indexHeaderMatch = line.match(/\\indexheader\{([^}]+)\}/);
   if (indexHeaderMatch) return indexHeaderMatch[1];
 
+  // e.g.
+  // \rSec2[array.syn]{Header \tcode{<array>} synopsis}
   const sectionMatch = line.match(
     /\\rSec\d\[(\w+(?:\.\w+)*)\]\{.*\\tcode\{<(\w+(?:\.\w+)*)>\}\s*synopsis\}/,
   );
@@ -88,16 +90,8 @@ function findHeaderMarker(lines: string[], lineIdx: number): string | null {
   return null;
 }
 
-function findNextCodeblock(
-  lines: string[],
-  startFrom: number,
-  maxLookAhead: number,
-): number | null {
-  for (
-    let i = startFrom;
-    i < Math.min(lines.length, startFrom + maxLookAhead);
-    i++
-  ) {
+function findNextCodeblock(lines: string[], startFrom: number): number | null {
+  for (let i = startFrom; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (
       trimmed.startsWith("\\begin{codeblock}") ||

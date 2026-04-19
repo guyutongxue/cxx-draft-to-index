@@ -22,12 +22,12 @@ async function main() {
     const symbols = parseCodeblock(synopsis.code, synopsis.header);
 
     const filtered = symbols.filter((s) => {
-      return s.kind !== "static_assert" &&
-        s.kind !== "extern_block" &&
+      return (
         s.name !== "" &&
         s.name !== "namespace" &&
         !s.name.startsWith("//") &&
-        !s.name.startsWith("/*");
+        !s.name.startsWith("/*")
+      );
     });
 
     for (const sym of filtered) {
@@ -56,7 +56,9 @@ async function main() {
 
   await Bun.write(outputPath, JSON.stringify(output, null, 2));
   const totalSymbols = headers.reduce((sum, h) => sum + h.symbols.length, 0);
-  console.log(`\nDone! Wrote ${totalSymbols} symbols across ${headers.length} headers to ${OUTPUT_FILE}`);
+  console.log(
+    `\nDone! Wrote ${totalSymbols} symbols across ${headers.length} headers to ${OUTPUT_FILE}`,
+  );
 }
 
 main().catch((err) => {
