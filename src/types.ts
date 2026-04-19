@@ -76,6 +76,15 @@ export interface NamespaceAliasSymbolEntry extends SymbolEntryBase {
 
 export interface TemplateSpecializationSymbolEntry extends SymbolEntryBase {
   kind: "partialTemplateSpecialization" | "fullTemplateSpecialization";
+  templateParams?: string[];
+  templateRequires?: string | null;
+}
+
+export interface DeductionGuideSymbolEntry extends SymbolEntryBase, TemplateInfo {
+  kind: "deductionGuide";
+  constructorName: string;
+  parameters: string[];
+  targetType: string;
 }
 
 type TemplateInfo = {
@@ -124,7 +133,8 @@ export type SymbolEntry =
   | ClassTemplateSymbolEntry
   | VariableTemplateSymbolEntry
   | OperatorTemplateSymbolEntry
-  | ConceptSymbolEntry;
+  | ConceptSymbolEntry
+  | DeductionGuideSymbolEntry;
 
 export type SymbolKind = SymbolEntry["kind"];
 

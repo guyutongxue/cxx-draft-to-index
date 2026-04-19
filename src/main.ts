@@ -21,27 +21,12 @@ async function main() {
     console.log(`Parsing <${synopsis.header}> (${synopsis.sourceFile})...`);
     const symbols = parseCodeblock(synopsis.code, synopsis.header);
 
-    const filtered = symbols.filter((s) => {
-      return (
-        s.name !== "" &&
-        s.name !== "namespace" &&
-        !s.name.startsWith("//") &&
-        !s.name.startsWith("/*")
-      );
-    });
-
-    for (const sym of filtered) {
-      if (!sym.namespace || sym.namespace === "") {
-        sym.namespace = "std";
-      }
-    }
-
     headers.push({
       header: synopsis.header,
-      symbols: filtered,
+      symbols,
     });
 
-    console.log(`  -> ${filtered.length} symbols`);
+    console.log(`  -> ${symbols.length} symbols`);
   }
 
   const output: IndexOutput = {

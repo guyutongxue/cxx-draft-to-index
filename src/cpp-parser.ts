@@ -1,646 +1,1865 @@
-import type { SymbolEntry, SymbolKind } from "./types";
+import type {
+  FunctionLikeMacroSymbolEntry,
+  MacroSymbolEntry,
+  SymbolEntry,
+  SymbolKind,
+} from "./types";
 
-export interface ParseContext {
-  header: string;
-  namespaceStack: string[];
+// ============================================================
+// Token types
+// ============================================================
+
+export enum TokenType {
+  Identifier,
+  Number,
+  StringLiteral,
+  CharLiteral,
+  Punct,
+  Ellipsis,
+  ScopeRes, // ::
+  Arrow, // ->
+  LatexEscape, // @...@
+  EOF,
 }
 
-function createDefaultContext(header: string): ParseContext {
-  return {
-    header,
-    namespaceStack: [],
-  };
+export interface Token {
+  type: TokenType;
+  value: string;
+  line: number;
+  col: number;
 }
 
-export function parseCodeblock(code: string, header: string): SymbolEntry[] {
-  const ctx = createDefaultContext(header);
-  const symbols: SymbolEntry[] = [];
-  const lines = code.split("\n");
+// ============================================================
+// Lexer
+// ============================================================
 
-  const cleanedLines = preprocessLatex(lines);
+const PUNCT_CHARS = new Set("{}()[],;:=*%+!~^&.|/<>?#@".split(""));
 
-  const joinedLines = joinContinuationLines(cleanedLines);
+export class Lexer {
+  public src: string;
+  public pos: number;
+  public line: number;
+  public col: number;
+  public cur: number;
 
-  for (const line of joinedLines) {
-    parseLine(line, ctx, symbols);
+  constructor(src: string) {
+    this.src = src;
+    this.pos = 0;
+    this.line = 1;
+    this.col = 1;
+    this.cur = this.src.length;
   }
 
-  return symbols;
-}
-
-function preprocessLatex(lines: string[]): string[] {
-  return lines.map((line) => {
-    let r = line;
-
-    r = r.replace(/@\\seebelow@/g, "/*see_below*/");
-    r = r.replace(/@\\seebelownc@/g, "/*see_below*/");
-    r = r.replace(/@\\seeabove@/g, "/*see_above*/");
-    r = r.replace(/@\\unspec@/g, "/*unspecified*/");
-    r = r.replace(/@\\unspecnc@/g, "/*unspecified*/");
-    r = r.replace(/@\\unspecbool@/g, "/*unspecified-bool-type*/");
-    r = r.replace(/@\\unspecalloctype@/g, "/*unspecified-allocator-type*/");
-    r = r.replace(/@\\unspecuniqtype@/g, "/*unspecified-unique-type*/");
-    r = r.replace(/@\\expos@/g, "/*exposition-only*/");
-
-    r = r.replace(/@\\deflibconcept\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\libconcept\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\defexposconcept\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\exposconcept\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\exposconceptnc\{([^}]+)\}@/g, "$1");
-
-    r = r.replace(/@\\exposid\{([^}]+)\}@/g, "__$1");
-    r = r.replace(/@\\exposidnc\{([^}]+)\}@/g, "__$1");
-
-    r = r.replace(/@\\placeholder\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\placeholdernc\{([^}]+)\}@/g, "$1");
-
-    r = r.replace(/@\\tcode\{([^}]*)\}@/g, "$1");
-
-    r = r.replace(/@\\keyword\{([^}]+)\}@/g, "$1");
-
-    r = r.replace(/@\\term\{([^}]+)\}@/g, "$1");
-    r = r.replace(/@\\ellip@/g, "...");
-    r = r.replace(/@\\brk@/g, " ");
-    r = r.replace(/@\\itcorr(?:\[[^\]]*\])?@/g, "");
-    r = r.replace(/@\\nocorr@/g, "");
-
-    r = r.replace(/@\\ref\{([^}]+)\}@/g, "");
-    r = r.replace(/\\ref\{([^}]+)\}/g, "");
-    r = r.replace(/@\\iref\{([^}]+)\}@/g, "");
-
-    r = r.replace(/\\tcode\{([^}]*)\}/g, "$1");
-    r = r.replace(/\\keyword\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\libconcept\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\deflibconcept\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\placeholder\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\exposid\{([^}]+)\}/g, "__$1");
-    r = r.replace(/\\grammarterm\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\term\{([^}]+)\}/g, "$1");
-
-    r = r.replace(/\\libmacro\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\defnlibxname\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\libxmacro\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\xname\{([^}]+)\}/g, "__$1");
-    r = r.replace(/\\defnlibxname\{([^}]+)\}/g, "$1");
-    r = r.replace(/\\mname\{([^}]+)\}/g, "__$1__");
-    r = r.replace(/\\UNSP\{([^}]*)\}/g, "/*$1*/");
-    r = r.replace(/\\UNSPnc\{([^}]*)\}/g, "/*$1*/");
-
-    r = r.replace(/\\indexlibrary\{[^}]*\}/g, "");
-    r = r.replace(/\\indexlibraryglobal\{[^}]*\}/g, "");
-    r = r.replace(/\\indexheader\{[^}]*\}/g, "");
-    r = r.replace(/\\indexlibrarymisc\{[^}]*\}/g, "");
-    r = r.replace(/\\indexlibraryctor\{[^}]*\}/g, "");
-    r = r.replace(/\\indexlibrarydtor\{[^}]*\}/g, "");
-    r = r.replace(/\\indextext\{[^}]*\}/g, "");
-    r = r.replace(/\\idxcode\{([^}]+)\}/g, "$1");
-
-    r = r.replace(/\\\*\\\*/g, "**");
-
-    r = r.replace(/@/g, "");
-
-    r = r.replace(/#if\s+defined\([^)]+\)/g, "");
-    r = r.replace(/#endif/g, "");
-    r = r.replace(/#ifdef\s+\w+/g, "");
-    r = r.replace(/#ifndef\s+\w+/g, "");
-    r = r.replace(/#else/g, "");
-    r = r.replace(/#elif\s+.*/g, "");
-
-    const commentIdx = r.indexOf("//");
-    if (commentIdx !== -1) {
-      r = r.substring(0, commentIdx).trimEnd();
-    }
-
-    return r.trim();
-  }).filter((line) => line.length > 0);
-}
-
-function joinContinuationLines(lines: string[]): string[] {
-  const result: string[] = [];
-  let buffer = "";
-  let braceDepth = 0;
-  let angleDepth = 0;
-  let inString = false;
-  let inChar = false;
-
-  function depth(): number {
-    return braceDepth + angleDepth;
+  private ch(offset: number = 0): string {
+    const idx = this.pos + offset;
+    return idx < this.cur ? this.src[idx] : "\0";
   }
 
-  for (const line of lines) {
-    if (buffer.length > 0) {
-      buffer += " " + line;
+  private advance(): string {
+    const c = this.src[this.pos];
+    if (c === "\n") {
+      this.line++;
+      this.col = 1;
     } else {
-      buffer = line;
+      this.col++;
     }
+    this.pos++;
+    return c;
+  }
 
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      const next = line[i + 1] || "";
-      if (inString) {
-        if (ch === '"' && line[i - 1] !== "\\") inString = false;
-        continue;
-      }
-      if (inChar) {
-        if (ch === "'" && line[i - 1] !== "\\") inChar = false;
-        continue;
-      }
-      if (ch === '"') { inString = true; continue; }
-      if (ch === "'") { inChar = true; continue; }
-      if (ch === "{") braceDepth++;
-      else if (ch === "}") braceDepth--;
-    }
-
-    if (braceDepth <= 0 && !buffer.trim().startsWith("template<") && buffer.endsWith(";")) {
-      result.push(buffer.trim());
-      buffer = "";
-      braceDepth = 0;
-      angleDepth = 0;
-    } else if (braceDepth <= 0 && buffer.endsWith("{")) {
-      result.push(buffer.trim());
-      buffer = "";
-    } else if (braceDepth === 0 && !buffer.endsWith(";") && !buffer.endsWith("{") && !buffer.endsWith(",") && depth() === 0) {
-      if (buffer.trim().startsWith("#") || buffer.trim().startsWith("namespace ")) {
-        result.push(buffer.trim());
-        buffer = "";
+  private skipWhitespaceAndComments(): void {
+    while (this.pos < this.cur) {
+      const c = this.ch();
+      if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+        this.advance();
+      } else if (c === "/" && this.ch(1) === "/") {
+        while (this.pos < this.cur && this.ch() !== "\n") this.advance();
+      } else if (c === "/" && this.ch(1) === "*") {
+        this.advance();
+        this.advance();
+        while (this.pos < this.cur) {
+          if (this.ch() === "*" && this.ch(1) === "/") {
+            this.advance();
+            this.advance();
+            break;
+          }
+          this.advance();
+        }
+      } else {
+        break;
       }
     }
   }
 
-  if (buffer.trim()) {
-    result.push(buffer.trim());
+  next(): Token {
+    this.skipWhitespaceAndComments();
+
+    if (this.pos >= this.cur) {
+      return { type: TokenType.EOF, value: "", line: this.line, col: this.col };
+    }
+
+    const sl = this.line;
+    const sc = this.col;
+    const c = this.ch();
+
+    // @...@ LaTeX escape
+    if (c === "@") {
+      this.advance();
+      let val = "@";
+      while (this.pos < this.cur && this.ch() !== "@") val += this.advance();
+      if (this.pos < this.cur) val += this.advance();
+      return { type: TokenType.LatexEscape, value: val, line: sl, col: sc };
+    }
+
+    // String literal
+    if (c === '"') {
+      let val = this.advance();
+      while (this.pos < this.cur) {
+        const x = this.advance();
+        val += x;
+        if (x === '"' && val[val.length - 2] !== "\\") break;
+      }
+      return { type: TokenType.StringLiteral, value: val, line: sl, col: sc };
+    }
+
+    // Char literal
+    if (c === "'") {
+      let val = this.advance();
+      while (this.pos < this.cur) {
+        const x = this.advance();
+        val += x;
+        if (x === "'" && val[val.length - 2] !== "\\") break;
+      }
+      return { type: TokenType.CharLiteral, value: val, line: sl, col: sc };
+    }
+
+    // Number
+    if (c >= "0" && c <= "9") {
+      let val = "";
+      while (this.pos < this.cur && /[0-9a-fA-FxX.'_]/.test(this.ch()))
+        val += this.advance();
+      return { type: TokenType.Number, value: val, line: sl, col: sc };
+    }
+
+    // Identifier / keyword
+    if (c === "_" || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
+      let val = "";
+      while (
+        this.pos < this.cur &&
+        (this.ch() === "_" ||
+          (this.ch() >= "a" && this.ch() <= "z") ||
+          (this.ch() >= "A" && this.ch() <= "Z") ||
+          (this.ch() >= "0" && this.ch() <= "9"))
+      ) {
+        val += this.advance();
+      }
+      return { type: TokenType.Identifier, value: val, line: sl, col: sc };
+    }
+
+    // ...
+    if (c === "." && this.ch(1) === "." && this.ch(2) === ".") {
+      this.advance();
+      this.advance();
+      this.advance();
+      return { type: TokenType.Ellipsis, value: "...", line: sl, col: sc };
+    }
+
+    // ->
+    if (c === "-" && this.ch(1) === ">") {
+      this.advance();
+      this.advance();
+      return { type: TokenType.Arrow, value: "->", line: sc, col: sc };
+    }
+
+    // ::
+    if (c === ":" && this.ch(1) === ":") {
+      this.advance();
+      this.advance();
+      return { type: TokenType.ScopeRes, value: "::", line: sl, col: sc };
+    }
+
+    // Single-char punctuation
+    if (PUNCT_CHARS.has(c)) {
+      this.advance();
+      return { type: TokenType.Punct, value: c, line: sl, col: sc };
+    }
+
+    // Fallback: skip unknown
+    this.advance();
+    return this.next();
   }
 
+  peekToken(): Token {
+    const sp = this.pos;
+    const sl = this.line;
+    const sc2 = this.col;
+    const tok = this.next();
+    this.pos = sp;
+    this.line = sl;
+    this.col = sc2;
+    return tok;
+  }
+}
+
+// ============================================================
+// LaTeX resolution
+// ============================================================
+
+const LATEX_SIMPLE: Record<string, string> = {
+  "\\seebelow": "/*see_below*/",
+  "\\seebelownc": "/*see_below*/",
+  "\\seeabove": "/*see_above*/",
+  "\\unspec": "/*unspecified*/",
+  "\\unspecnc": "/*unspecified*/",
+  "\\unspecbool": "/*unspecified-bool-type*/",
+  "\\unspecalloctype": "/*unspecified-allocator-type*/",
+  "\\unspecuniqtype": "/*unspecified-unique-type*/",
+  "\\expos": "/*exposition-only*/",
+  "\\ellip": "...",
+  "\\brk": " ",
+  "\\nocorr": "",
+};
+
+const LATEX_BRACED: [RegExp, string][] = [
+  // as-is replacement with LaTeX labels
+  [/^\\libmacro\{([^}]+)\}$/g, "$1"],
+  [/^\\defnlibxname\{([^}]+)\}$/g, "$1"],
+  [/^\\libglobal\{([^}]+)\}$/g, "$1"],
+  [/^\\global\{([^}]+)\}$/g, "$1"],
+  [/^\\deflibconcept\{([^}]+)\}$/g, "$1"],
+  [/^\\libconcept\{([^}]+)\}$/g, "$1"],
+  [/^\\ref\{([^}]+)\}$/g, ""],
+  [/^\\iref\{([^}]+)\}$/g, ""],
+
+  // exposition-only symbols, prefix with __
+  [/^\\defexposconcept\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposconcept\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposconceptnc\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposid\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposidnc\{([^}]+)\}$/g, "__$1"],
+  // placeholders, should be as-is
+  [/^\\placeholder\{([^}]+)\}$/g, "$1"],
+  [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
+
+
+  // [/^\\tcode\{([^}]*)\}$/g, "$1"],
+  // [/^\\keyword\{([^}]+)\}$/g, "$1"],
+  // [/^\\term\{([^}]+)\}$/g, "$1"],
+
+  // alignment
+  [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
+];
+
+
+function resolveSingleLaTeX(text: string): string {
+  if (typeof LATEX_SIMPLE[text] === "string") {
+    return LATEX_SIMPLE[text];
+  }
+  for (const [regex, replacement] of LATEX_BRACED) {
+    text = text.replace(regex, replacement);
+  }
+  // \textit command: replace with comment and drop its all inner LaTeX commands
+  if (text.startsWith("\\textit{") && text.endsWith("}")) {
+    text = `/* ${text.replace(/\\\w+\{|\}/g, "")} */`;
+  }
+  return text;
+}
+
+export function resolveLatex(tok: Token): string {
+  if (tok.type !== TokenType.LatexEscape) return tok.value;
+  return resolveSingleLaTeX(tok.value);
+}
+
+/**
+ * Used in extract macro symbols.
+ * We should ONLY call this in preprocessing
+ * @param text
+ * @returns
+ */
+function resolveLaTeXInText(text: string): string {
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "@") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== "@") {
+        j++;
+      }
+      if (j < text.length) {
+        result += resolveSingleLaTeX(text.slice(i + 1, j));
+        i = j + 1;
+      } else {
+        result += text.slice(i);
+        break;
+      }
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
   return result;
 }
 
-function parseLine(line: string, ctx: ParseContext, symbols: SymbolEntry[]): void {
-  if (!line || line.trim().length === 0) return;
-  const s = line.trim();
+// ============================================================
+// Specifier tracking
+// ============================================================
 
-  if (s === "{" || s === "}") return;
+interface SpecifierSet {
+  inline: boolean;
+  constexpr: boolean;
+  constinit: boolean;
+  static: boolean;
+  virtual: boolean;
+  explicit: boolean;
+  friend: boolean;
+  volatile: boolean;
+  extern: boolean;
+  thread_local: boolean;
+  mutable: boolean;
+}
 
-  if (/^#define\s+/.test(s)) {
-    const m = s.match(/^#define\s+(\w+)/);
-    if (m) {
-      symbols.push(makeSym(ctx, m[1], "macro", undefined, undefined, s));
-    }
-    return;
+const SPECIFIER_KW = new Set([
+  "inline",
+  "constexpr",
+  "consteval",
+  "constinit",
+  "static",
+  "virtual",
+  "explicit",
+  "friend",
+  "volatile",
+  "extern",
+  "thread_local",
+  "mutable",
+]);
+
+function emptySpecs(): SpecifierSet {
+  return {
+    inline: false,
+    constexpr: false,
+    constinit: false,
+    static: false,
+    virtual: false,
+    explicit: false,
+    friend: false,
+    volatile: false,
+    extern: false,
+    thread_local: false,
+    mutable: false,
+  };
+}
+
+// ============================================================
+// Template info
+// ============================================================
+
+interface TemplateInfo {
+  templateParams: string[];
+  templateRequires: string | null;
+  isFullSpecialization: boolean;
+}
+
+// ============================================================
+// Declarator analysis result
+// ============================================================
+
+interface DeclaratorInfo {
+  name: string;
+  kind: "function" | "variable" | "deductionGuide";
+  returnType: string;
+  parameters: string[];
+  hasTemplateArgsOnName: boolean;
+}
+
+// ============================================================
+// Parser
+// ============================================================
+
+export class Parser {
+  private lexer: Lexer;
+  private header: string;
+  private nsStack: string[];
+  private inlineUnspec: boolean;
+  private langLinkage: "C" | "C++" | null;
+  symbols: SymbolEntry[];
+  private la: Token;
+  private savedPos: number;
+  private savedLine: number;
+  private savedCol: number;
+
+  constructor(lexer: Lexer, header: string) {
+    this.lexer = lexer;
+    this.header = header;
+    this.nsStack = [];
+    this.inlineUnspec = false;
+    this.langLinkage = null;
+    this.symbols = [];
+    this.la = lexer.next();
+    this.savedPos = 0;
+    this.savedLine = 1;
+    this.savedCol = 1;
   }
 
-  if (/^#include\s+/.test(s)) return;
+  // ---- Token helpers ----
 
-  if (s === "}") {
-    ctx.namespaceStack.pop();
-    return;
+  private adv(): Token {
+    const t = this.la;
+    this.la = this.lexer.next();
+    return t;
   }
 
-  if (s.endsWith("}") && /^(namespace|inline\s+namespace)\s/.test(s.replace(/\}\s*;?\s*$/, ""))) {
-    const nsMatch = s.match(/^(?:inline\s+)?namespace\s+([\w:]+)\s*\{/);
-    if (nsMatch) {
-      ctx.namespaceStack.push(nsMatch[1]);
-      const innerStart = s.indexOf("{");
-      const innerEnd = s.lastIndexOf("}");
-      if (innerStart !== -1 && innerEnd !== -1) {
-        const inner = s.substring(innerStart + 1, innerEnd).trim();
-        if (inner) {
-          parseInnerBlock(inner, ctx, symbols);
-        }
+  private acceptVal(v: string): Token | null {
+    if (this.la.value === v) return this.adv();
+    return null;
+  }
+
+  private isId(v: string): boolean {
+    return this.la.type === TokenType.Identifier && this.la.value === v;
+  }
+
+  private isP(v: string): boolean {
+    return this.la.type === TokenType.Punct && this.la.value === v;
+  }
+
+  private isTT(tt: TokenType): boolean {
+    return this.la.type === tt;
+  }
+
+  private eof(): boolean {
+    return this.la.type === TokenType.EOF;
+  }
+
+  private resolved(tok: Token): string {
+    return tok.type === TokenType.LatexEscape ? resolveLatex(tok) : tok.value;
+  }
+
+  private save(): void {
+    this.savedPos = this.lexer["pos"];
+    this.savedLine = this.lexer["line"];
+    this.savedCol = this.lexer["col"];
+  }
+
+  private restore(): void {
+    this.lexer["pos"] = this.savedPos;
+    this.lexer["line"] = this.savedLine;
+    this.lexer["col"] = this.savedCol;
+    this.la = this.lexer.next();
+    // But we need to re-skip whitespace/comments from the saved position
+  }
+
+  // ---- Balanced skip helpers ----
+
+  private skipBalanced(open: string, close: string): string {
+    let depth = 0;
+    let raw = "";
+    let started = false;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === open) {
+        depth++;
+        started = true;
       }
-      ctx.namespaceStack.pop();
+      if (v === close) depth--;
+      raw += v;
+      this.adv();
+      if (started && depth === 0) break;
     }
-    return;
+    return raw;
   }
 
-  if (/^(?:inline\s+)?namespace\s+/.test(s) && s.includes("{")) {
-    const nsMatch = s.match(/^(?:inline\s+)?namespace\s+([\w:]+)\s*\{/);
-    if (nsMatch) {
-      ctx.namespaceStack.push(nsMatch[1]);
-      const braceStart = s.indexOf("{");
-      const braceEnd = s.lastIndexOf("}");
-      if (braceEnd > braceStart) {
-        const inner = s.substring(braceStart + 1, braceEnd).trim();
-        if (inner) {
-          parseInnerBlock(inner, ctx, symbols);
-        }
-        ctx.namespaceStack.pop();
+  private skipBalancedNoCollect(open: string, close: string): void {
+    let depth = 0;
+    let started = false;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === open) {
+        depth++;
+        started = true;
       }
+      if (v === close) depth--;
+      this.adv();
+      if (started && depth === 0) break;
+    }
+  }
+
+  private skipToSemicolon(): void {
+    let depth = 0;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === "(" || v === "[" || v === "<") depth++;
+      else if (v === ")" || v === "]" || v === ">") depth--;
+      else if (depth === 0 && v === ";") break;
+      else if (depth === 0 && v === "{") {
+        this.skipBalancedNoCollect("{", "}");
+        continue;
+      }
+      this.adv();
+    }
+  }
+
+  private skipToSemicolonOrBrace(): string {
+    let depth = 0;
+    let raw = "";
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (depth === 0 && (v === ";" || v === "{")) break;
+      if (v === "(" || v === "<") depth++;
+      else if (v === ")" || v === ">") depth--;
+      else if (v === "[") {
+        /* skip */
+      } else if (v === "]") {
+        /* skip */
+      }
+      raw += (raw ? " " : "") + this.resolved(this.la);
+      this.adv();
+    }
+    return raw;
+  }
+
+  private skipInitializer(): void {
+    let depth = 0;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === "(" || v === "{" || v === "<") depth++;
+      else if (v === ")" || v === "}" || v === ">") depth--;
+      else if (depth === 0 && (v === ";" || v === ",")) break;
+      this.adv();
+    }
+  }
+
+  private skipBaseClasses(): void {
+    this.adv(); // consume :
+    let depth = 0;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === "(") depth++;
+      else if (v === ")") depth--;
+      else if (v === "<") depth++;
+      else if (v === ">") depth--;
+      else if (depth === 0 && (v === "{" || v === ";")) break;
+      this.adv();
+    }
+  }
+
+  // ---- Specifier parsing ----
+
+  private parseSpecifiers(): SpecifierSet {
+    const s = emptySpecs();
+    while (!this.eof()) {
+      if (
+        this.la.type === TokenType.Identifier &&
+        SPECIFIER_KW.has(this.la.value)
+      ) {
+        const kw = this.la.value;
+        this.adv();
+        if (kw === "inline") s.inline = true;
+        else if (kw === "constexpr") s.constexpr = true;
+        else if (kw === "constinit") s.constinit = true;
+        else if (kw === "static") s.static = true;
+        else if (kw === "virtual") s.virtual = true;
+        else if (kw === "friend") s.friend = true;
+        else if (kw === "volatile") s.volatile = true;
+        else if (kw === "mutable") s.mutable = true;
+        else if (kw === "thread_local") s.thread_local = true;
+        else if (kw === "explicit") {
+          s.explicit = true;
+          if (this.isP("(")) this.skipBalancedNoCollect("(", ")");
+        } else if (kw === "extern") {
+          s.extern = true;
+          if ((this.la.type as number) === TokenType.StringLiteral) {
+            this.langLinkage = this.la.value.replace(/"/g, "") as "C" | "C++";
+            this.adv();
+          }
+        }
+      } else break;
+    }
+    return s;
+  }
+
+  // ---- Template parameter list ----
+
+  private parseTemplateParams(): TemplateInfo {
+    this.adv(); // consume <
+    let depth = 1;
+    const params: string[] = [];
+    let cur = "";
+    let requiresText: string | null = null;
+
+    while (!this.eof() && depth > 0) {
+      const v = this.la.value;
+
+      if (v === "<") {
+        depth++;
+        cur += "< ";
+        this.adv();
+      } else if (v === ">") {
+        depth--;
+        if (depth === 0) {
+          if (cur.trim()) params.push(cur.trim());
+          this.adv();
+          break;
+        }
+        cur += "> ";
+        this.adv();
+      } else if (depth === 1 && v === ",") {
+        if (cur.trim()) params.push(cur.trim());
+        cur = "";
+        this.adv();
+      } else {
+        const r =
+          this.la.type === TokenType.LatexEscape
+            ? resolveLatex(this.la)
+            : this.la.value;
+        if (r.length > 0) {
+          const needsSp =
+            cur.length > 0 &&
+            /[a-zA-Z0-9_]/.test(cur[cur.length - 1]) &&
+            /[a-zA-Z0-9_]/.test(r);
+          cur += (needsSp ? " " : "") + r;
+        }
+        this.adv();
+      }
+    }
+
+    const isFull = params.length === 0;
+
+    if (this.isId("requires")) {
+      this.adv();
+      requiresText = this.skipRequiresExpression();
+    }
+
+    return {
+      templateParams: params,
+      templateRequires: requiresText,
+      isFullSpecialization: isFull,
+    };
+  }
+
+  private skipRequiresExpression(): string {
+    let raw = "";
+
+    if (this.isP("(")) {
+      raw = this.skipBalanced("(", ")");
+      return raw;
+    }
+
+    if (this.isP("{")) {
+      this.skipBalancedNoCollect("{", "}");
+      return "{ ... }";
+    }
+
+    // Otherwise, consume tokens that are part of the requires expression.
+    // A requires-clause after template<...> ends when we see a declaration keyword
+    // (class, struct, union, enum, using, concept, typedef) or an identifier that starts
+    // the actual declaration. We track balanced parens and angle brackets.
+    let depth = 0;
+    const DECL_KEYWORDS = new Set([
+      "class",
+      "struct",
+      "union",
+      "enum",
+      "using",
+      "concept",
+      "typedef",
+      "inline",
+      "constexpr",
+      "consteval",
+      "constinit",
+      "static",
+      "virtual",
+      "explicit",
+      "friend",
+      "extern",
+      "thread_local",
+      "mutable",
+      "volatile",
+    ]);
+    let tokenCount = 0;
+    while (!this.eof()) {
+      const v = this.la.value;
+      if (v === "(") depth++;
+      else if (v === ")") depth--;
+      else if (v === "<") depth++;
+      else if (v === ">") depth--;
+
+      // Stop at declaration-starting keywords at depth 0
+      if (
+        depth === 0 &&
+        this.la.type === TokenType.Identifier &&
+        DECL_KEYWORDS.has(v)
+      ) {
+        break;
+      }
+
+      // Also stop at ; or { at depth 0 (end of requires clause context)
+      if (depth === 0 && (v === ";" || v === "{")) {
+        break;
+      }
+
+      raw += (raw ? " " : "") + this.resolved(this.la);
+      this.adv();
+      tokenCount++;
+
+      // Safety: don't consume more than 200 tokens
+      if (tokenCount > 200) break;
+
+      // After depth returns to 0 and we've consumed at least one token,
+      // check if the next token could start a declaration
+      if (depth <= 0 && tokenCount > 0) {
+        // If we just closed balanced parens/brackets and the next token
+        // looks like it starts a declaration, stop
+        const nextIsDecl =
+          this.la.type === TokenType.Identifier &&
+          DECL_KEYWORDS.has(this.la.value);
+        if (nextIsDecl) break;
+      }
+    }
+    return raw.trim();
+  }
+
+  // ---- Top-level ----
+
+  parseTopLevel(): void {
+    let lastPos = -1;
+    let stallCount = 0;
+    while (!this.eof()) {
+      const curPos = this.lexer.pos;
+      if (curPos === lastPos) {
+        stallCount++;
+        if (stallCount > 100) {
+          // Completely stuck — advance past current token
+          this.adv();
+          stallCount = 0;
+        }
+      } else {
+        lastPos = curPos;
+        stallCount = 0;
+      }
+
+      if (this.isP("}")) {
+        if (this.nsStack.length > 0) this.nsStack.pop();
+        this.adv();
+        continue;
+      }
+      this.parseDeclaration(emptySpecs(), null);
+    }
+  }
+
+  // ---- Declaration dispatch ----
+
+  private parseDeclaration(
+    specs: SpecifierSet,
+    tInfo: TemplateInfo | null,
+  ): void {
+    if (this.eof()) return;
+
+    // template<...>
+    if (this.isId("template")) {
+      this.adv();
+      const ti = this.parseTemplateParams();
+      const combined = this.combineTI(tInfo, ti);
+      const inner = this.parseSpecifiers();
+      this.parseDeclaration(inner, combined);
       return;
     }
-  }
 
-  if (/^(?:inline\s+)?namespace\s+/.test(s) && !s.includes("{")) {
-    const nsMatch = s.match(/^(?:inline\s+)?namespace\s+([\w:]+)/);
-    if (nsMatch) {
-      ctx.namespaceStack.push(nsMatch[1]);
+    // namespace
+    if (this.isId("namespace")) {
+      this.parseNamespace();
+      return;
     }
-    return;
-  }
 
-  if (/^static_assert\s*\(/.test(s)) {
-    return;
-  }
-
-  if (/^using\s+namespace\s+/.test(s)) {
-    const m = s.match(/^using\s+namespace\s+([\w:]+)/);
-    if (m) {
-      symbols.push(makeSym(ctx, "using namespace " + m[1], "namespaceAlias", undefined, undefined, s));
+    // class/struct/union (but not inside template params)
+    if (this.isId("class") || this.isId("struct") || this.isId("union")) {
+      this.parseClassOrStruct(specs, tInfo);
+      return;
     }
-    return;
+
+    // enum
+    if (this.isId("enum")) {
+      this.parseEnum(tInfo);
+      return;
+    }
+
+    // typedef
+    if (this.isId("typedef")) {
+      this.parseTypedef();
+      return;
+    }
+
+    // using
+    if (this.isId("using")) {
+      this.parseUsing(tInfo);
+      return;
+    }
+
+    // concept
+    if (this.isId("concept")) {
+      this.parseConcept(tInfo);
+      return;
+    }
+
+    // static_assert
+    if (this.isId("static_assert")) {
+      this.skipToSemicolon();
+      if (this.isP(";")) this.adv();
+      return;
+    }
+
+    // extern "C"/"C++" linkage specification
+    if (specs.extern && this.la.type === TokenType.StringLiteral) {
+      const lang = this.la.value.replace(/"/g, "");
+      this.langLinkage = lang as "C" | "C++";
+      this.adv();
+      if (this.isP("{")) {
+        this.adv();
+        while (!this.eof() && !this.isP("}")) {
+          if (this.isP("}")) break;
+          const inner = this.parseSpecifiers();
+          this.parseDeclaration(inner, null);
+        }
+        if (this.isP("}")) this.adv();
+        this.langLinkage = null;
+        return;
+      }
+    }
+
+    // requires clause before declaration
+    if (this.isId("requires")) {
+      this.adv();
+      this.skipRequiresExpression();
+      const inner = this.parseSpecifiers();
+      this.parseDeclaration(inner, tInfo);
+      return;
+    }
+
+    // Disambiguate: function, variable, operator, deduction guide
+    this.parseFunctionOrVariableOrOperator(specs, tInfo);
   }
 
-  if (/^template\s*</.test(s)) {
-    parseTemplateDeclaration(s, ctx, symbols);
-    return;
+  // ---- Namespace ----
+
+  private parseNamespace(): void {
+    this.adv(); // "namespace"
+
+    let isInline = false;
+    if (this.isId("inline")) {
+      isInline = true;
+      this.adv();
+    }
+
+    const name = this.readQualifiedIdent();
+    if (!name) {
+      this.skipToSemicolon();
+      if (this.isP(";")) this.adv();
+      return;
+    }
+
+    // namespace X = Y;
+    if (this.isP("=")) {
+      this.adv();
+      const target = this.readQualifiedIdent();
+      if (this.isP(";")) this.adv();
+      this.push(
+        this.makeSym(target, "namespaceAlias", null, undefined, undefined),
+      );
+      return;
+    }
+
+    // namespace X { ... }
+    if (this.isP("{")) {
+      this.adv();
+      this.nsStack.push(name);
+      return;
+    }
+
+    // namespace X; (forward declaration)
+    this.nsStack.push(name);
+    if (this.isP(";")) this.adv();
   }
 
-  if (/^(?:class|struct|union)\s/.test(s) || /^(?:class|struct|union)\s*$/.test(s)) {
-    parseClassOrStruct(s, undefined, ctx, symbols);
-    return;
+  // ---- Using ----
+
+  private parseUsing(tInfo: TemplateInfo | null): void {
+    this.adv(); // "using"
+
+    // using namespace X;
+    if (this.isId("namespace")) {
+      this.adv();
+      const target = this.readQualifiedIdent();
+      if (this.isP(";")) this.adv();
+      this.push(
+        this.makeSym(target, "usingDirective", null, undefined, undefined, {
+          targetNamespace: target,
+        }),
+      );
+      return;
+    }
+
+    // using typename X::Y;
+    if (this.isId("typename")) {
+      this.adv();
+    }
+
+    const first = this.readIdentOrLatex();
+    if (!first) {
+      this.skipToSemicolon();
+      if (this.isP(";")) this.adv();
+      return;
+    }
+
+    // using X = TYPE;
+    if (this.isP("=")) {
+      this.adv();
+      const typeText = this.skipToSemicolonOrBrace();
+      if (this.isP(";")) this.adv();
+      const kind: SymbolKind = tInfo ? "typeAliasTemplate" : "typeAlias";
+      this.push(
+        this.makeSym(first, kind, tInfo, typeText || undefined, undefined, {
+          syntax: "using" as const,
+        }),
+      );
+      return;
+    }
+
+    // using X::Y::Z;
+    let target = first;
+    while (this.la.type === TokenType.ScopeRes) {
+      this.adv();
+      const part = this.readIdentOrLatex();
+      target += "::" + (part || "");
+    }
+
+    if (this.isP(";")) this.adv();
+    const simpleName = target.includes("::")
+      ? target.split("::").pop()!
+      : target;
+    this.push(
+      this.makeSym(simpleName, "usingDeclaration", null, undefined, undefined, {
+        target,
+      }),
+    );
   }
 
-  if (/^enum\s+(class\s+|struct\s+)?/.test(s)) {
-    parseEnum(s, undefined, ctx, symbols);
-    return;
-  }
+  // ---- Class / struct / union ----
 
-  if (/^typedef\s+/.test(s)) {
-    parseTypedef(s, ctx, symbols);
-    return;
-  }
+  private parseClassOrStruct(
+    specs: SpecifierSet,
+    tInfo: TemplateInfo | null,
+  ): void {
+    const classKey = this.la.value;
+    if (classKey !== "class" && classKey !== "struct" && classKey !== "union")
+      return;
+    this.adv();
 
-  if (/^using\s+\w+\s*=\s*/.test(s)) {
-    parseTypeAlias(s, undefined, ctx, symbols);
-    return;
-  }
+    // Skip MANGLE_ON_* attributes
+    while (
+      !this.eof() &&
+      this.la.type === TokenType.Identifier &&
+      this.la.value.startsWith("MANGLE_ON_")
+    ) {
+      this.adv();
+    }
 
-  if (s.startsWith("using ")) {
-    parseUsingDecl(s, undefined, ctx, symbols);
-    return;
-  }
+    const name = this.readIdentOrLatex();
+    if (!name) {
+      this.skipToSemicolonOrBrace();
+      if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+      if (this.isP(";")) this.adv();
+      return;
+    }
 
-  if (/operator/.test(s) && !/operator[<>]=?/.test(s.replace(/operator[<>]=?/g, ""))) {
-    parseOperator(s, undefined, ctx, symbols);
-    return;
-  }
+    let hasTemplateArgs = false;
+    if (this.isP("<")) {
+      hasTemplateArgs = true;
+      this.skipBalancedNoCollect("<", ">");
+    }
 
-  const funcInfo = tryParseFunction(s, ctx);
-  if (funcInfo) {
-    symbols.push(funcInfo);
-    return;
-  }
+    // final/abstract
+    if (this.isId("final") || this.isId("abstract")) this.adv();
 
-  const varInfo = tryParseVariable(s, ctx);
-  if (varInfo) {
-    symbols.push(varInfo);
-    return;
-  }
+    // : base classes
+    if (this.isP(":")) this.skipBaseClasses();
 
-  const identifier = extractIdentifier(s);
-  if (identifier && !/^[{};]/.test(identifier)) {
-    symbols.push(makeSym(ctx, identifier, guessKind(s), undefined, undefined, s));
-  }
-}
-
-function parseInnerBlock(text: string, ctx: ParseContext, symbols: SymbolEntry[]): void {
-  const stmts = splitBySemicolonsAndBraces(text);
-  for (const stmt of stmts) {
-    parseLine(stmt, ctx, symbols);
-  }
-}
-
-function splitBySemicolonsAndBraces(text: string): string[] {
-  const results: string[] = [];
-  let current = "";
-  let braceDepth = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "{") braceDepth++;
-    else if (ch === "}") braceDepth--;
-
-    if (ch === ";" && braceDepth <= 0) {
-      if (current.trim()) results.push(current.trim() + ";");
-      current = "";
-    } else if (ch === "}" && braceDepth <= 0) {
-      current += ch;
-      if (current.trim()) results.push(current.trim());
-      current = "";
+    let kind: SymbolKind;
+    if (tInfo) {
+      if (hasTemplateArgs) {
+        kind = tInfo.isFullSpecialization
+          ? "fullTemplateSpecialization"
+          : "partialTemplateSpecialization";
+      } else {
+        kind = (classKey === "union" ? "class" : classKey) as
+          | "class"
+          | "struct";
+        kind = (kind + "Template") as SymbolKind;
+      }
     } else {
-      current += ch;
+      if (hasTemplateArgs) {
+        kind = "fullTemplateSpecialization";
+      } else {
+        kind = classKey as "class" | "struct" | "union";
+      }
     }
+
+    this.push(this.makeSym(name, kind, tInfo, undefined, undefined));
+
+    if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+    if (this.isP(";")) this.adv();
   }
 
-  if (current.trim()) results.push(current.trim());
-  return results;
-}
+  // ---- Enum ----
 
-function parseTemplateDeclaration(s: string, ctx: ParseContext, symbols: SymbolEntry[]): void {
-  const templateMatch = s.match(/^template\s*<(.+?)>\s*([\s\S]*)$/);
-  if (!templateMatch) return;
+  private parseEnum(tInfo: TemplateInfo | null): void {
+    this.adv(); // "enum"
 
-  const templateParams = "<" + templateMatch[1].trim() + ">";
-  const remainder = templateMatch[2].trim();
+    let scoped = false;
+    if (this.isId("class") || this.isId("struct")) {
+      scoped = true;
+      this.adv();
+    }
 
-  if (!remainder) return;
-
-  if (/^concept\s+/.test(remainder)) {
-    const m = remainder.match(/^concept\s+(\w+)\s*=/);
-    if (m) {
-      symbols.push(makeSym(ctx, m[1], "concept", templateParams, undefined, s));
+    const name = this.readIdentOrLatex();
+    if (!name) {
+      this.skipToSemicolonOrBrace();
+      if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+      if (this.isP(";")) this.adv();
       return;
     }
+
+    if (this.isP(":")) {
+      this.adv();
+      this.skipToSemicolonOrBrace();
+    }
+
+    this.push(
+      this.makeSym(name, "enum", tInfo, undefined, undefined, { scoped }),
+    );
+
+    if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+    if (this.isP(";")) this.adv();
   }
 
-  if (/^(?:class|struct|union)\s/.test(remainder)) {
-    parseClassOrStruct(remainder, templateParams, ctx, symbols);
-    return;
-  }
+  // ---- Typedef ----
 
-  if (/^enum\s+(class\s+|struct\s+)?/.test(remainder)) {
-    parseEnum(remainder, templateParams, ctx, symbols);
-    return;
-  }
+  private parseTypedef(): void {
+    this.adv(); // "typedef"
 
-  if (/^using\s+\w+\s*=\s*/.test(remainder)) {
-    parseTypeAlias(remainder, templateParams, ctx, symbols);
-    return;
-  }
+    let lastIdent = "";
+    while (!this.eof() && !this.isP(";")) {
+      if (
+        this.la.type === TokenType.Identifier ||
+        this.la.type === TokenType.LatexEscape
+      ) {
+        lastIdent = this.resolved(this.la);
+      }
+      this.adv();
+    }
+    if (this.isP(";")) this.adv();
 
-  if (/operator/.test(remainder)) {
-    parseOperator(remainder, templateParams, ctx, symbols);
-    return;
-  }
-
-  const specifiers = "inline|constexpr|consteval|constinit|static|virtual|explicit|friend|volatile|extern|thread_local|mutable";
-  const specRe = new RegExp(`^(?:(?:${specifiers})\\s+)*`);
-  const stripped = remainder.replace(specRe, "").trim();
-
-  if (isFunctionish(stripped)) {
-    const nameMatch = extractFunctionName(stripped);
-    if (nameMatch) {
-      symbols.push(makeSym(ctx, nameMatch, "functionTemplate", templateParams, undefined, s));
-      return;
+    if (lastIdent) {
+      this.push(
+        this.makeSym(lastIdent, "typeAlias", null, undefined, undefined, {
+          syntax: "typedef" as const,
+        }),
+      );
     }
   }
 
-  if (/requires\s/.test(remainder) && /\w+\s*\{/.test(remainder)) {
-    const nameMatch = remainder.match(/(\w+)\s*\{/);
-    if (nameMatch) {
-      symbols.push(makeSym(ctx, nameMatch[1], "class", templateParams, undefined, s));
+  // ---- Concept ----
+
+  private parseConcept(tInfo: TemplateInfo | null): void {
+    this.adv(); // "concept"
+    const name = this.readIdentOrLatex();
+    if (!name) {
+      this.skipToSemicolon();
+      if (this.isP(";")) this.adv();
       return;
     }
+
+    this.skipToSemicolon();
+    if (this.isP(";")) this.adv();
+    this.push(this.makeSym(name, "concept", tInfo, undefined, undefined));
   }
 
-  const varMatch = remainder.match(/^(?:(?:inline|constexpr|constinit|static|thread_local|volatile|extern)\s+)*(.+?)\s+(\w+)\s*(?:=|;)/);
-  if (varMatch) {
-    symbols.push(makeSym(ctx, varMatch[2], "variableTemplate", templateParams, varMatch[1].trim(), s));
-    return;
+  // ---- Operator detection ----
+
+  private isOperatorAhead(): boolean {
+    // Instead of scanning forward (which is fragile with lexer state),
+    // we check if the current token sequence starts with something that
+    // could contain "operator". We simply delegate to the scanner
+    // which will detect "operator" during declarator analysis.
+    // The real check happens in parseFunctionOrVariableOrOperator.
+    return false;
   }
 
-  const lastIdent = extractLastIdentifier(remainder);
-  if (lastIdent) {
-    symbols.push(makeSym(ctx, lastIdent, "functionTemplate", templateParams, undefined, s));
+  // ---- Big disambiguator ----
+
+  private parseFunctionOrVariableOrOperator(
+    specs: SpecifierSet,
+    tInfo: TemplateInfo | null,
+  ): void {
+    // Check if current token stream starts with or contains "operator"
+    // before we reach ( or ;
+    if (this.detectOperator()) {
+      this.parseOperator(specs, tInfo);
+      return;
+    }
+
+    // Scan forward to classify the declaration
+    const info = this.scanDeclarator(specs, tInfo);
+    if (info) {
+      this.emitDeclarator(info, specs, tInfo);
+      return;
+    }
+
+    // Fallback: skip
+    this.skipToSemicolonOrBrace();
+    if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+    if (this.isP(";")) this.adv();
   }
-}
 
-function parseClassOrStruct(
-  s: string,
-  templateParams: string | undefined,
-  ctx: ParseContext,
-  symbols: SymbolEntry[],
-): void {
-  const m = s.match(/^(?:export\s+)?(?:inline\s+)?(class|struct|union)\s+(?:MANGLE_ON_\w+\s+)?(\w+)/);
-  if (m) {
-    const kind = m[1] as "class" | "struct" | "union";
-    symbols.push(makeSym(ctx, m[2], kind, templateParams, undefined, s));
+  private detectOperator(): boolean {
+    // Clone the lexer at the current position to look ahead without advancing
+    const clone = new Lexer("");
+    clone.src = this.lexer.src;
+    clone.pos = this.lexer.pos;
+    clone.line = this.lexer.line;
+    clone.col = this.lexer.col;
+    clone.cur = this.lexer.cur;
+
+    let depth = 0;
+    let maxScan = 80;
+    while (maxScan-- > 0) {
+      const tok = clone.next();
+      if (tok.type === TokenType.EOF) break;
+      if (tok.type === TokenType.Identifier && tok.value === "operator")
+        return true;
+      if (tok.value === "(" || tok.value === "<") depth++;
+      if (tok.value === ")" || tok.value === ">") depth--;
+      if (
+        depth === 0 &&
+        (tok.value === ";" || tok.value === "{" || tok.value === "=")
+      )
+        break;
+    }
+    return false;
   }
-}
 
-function parseEnum(
-  s: string,
-  templateParams: string | undefined,
-  ctx: ParseContext,
-  symbols: SymbolEntry[],
-): void {
-  const m = s.match(/^enum\s+(class\s+|struct\s+)?(\w+)/);
-  if (m) {
-    const isScoped = !!m[1];
-    symbols.push(makeSym(ctx, m[2], "enum", templateParams, undefined, s));
+  private scanDeclarator(
+    specs: SpecifierSet,
+    tInfo: TemplateInfo | null,
+  ): DeclaratorInfo | null {
+    // Walk tokens collecting type/name, looking for '(' to indicate function,
+    // '=' for variable, or '->' for deduction guide / trailing return type.
+    const tokens: { resolved: string; raw: string }[] = [];
+    let lastIdentIdx = -1;
+    let hasNameAngleBracket = false;
+    let sawOpenParen = false;
+    let paramDepth = 0;
+    let angleDepth = 0;
+    let state: "type" | "params" | "afterParams" = "type";
+    let paramText = "";
+    let nameIdent = "";
+    let returnType = "";
+    let isDeductionGuide = false;
+    let trailingRT = "";
+
+    while (!this.eof()) {
+      const v = this.la.value;
+
+      if (state === "type") {
+        if (v === "(") {
+          sawOpenParen = true;
+          state = "params";
+          paramDepth = 1;
+          this.adv();
+          continue;
+        } else if (v === "=" || v === ";") {
+          break;
+        } else if (v === "{") {
+          break;
+        } else if (v === ",") {
+          // Multiple declarators on one line - just take first
+          break;
+        } else if (
+          this.la.type === TokenType.Identifier ||
+          this.la.type === TokenType.LatexEscape
+        ) {
+          const r = this.resolved(this.la);
+          tokens.push({ resolved: r, raw: v });
+          nameIdent = r;
+          lastIdentIdx = tokens.length - 1;
+          // Reset template args flag — only the last identifier before ( should have this set
+          hasNameAngleBracket = false;
+          this.adv();
+          // Check for < after identifier (template args on name)
+          // BUT: this might be part of a return type (e.g., vector<int> foo;)
+          // We'll set hasNameAngleBracket here, but it gets reset if another
+          // identifier follows before (
+          if (this.isP("<")) {
+            hasNameAngleBracket = true;
+            this.skipBalancedNoCollect("<", ">");
+          }
+          continue;
+        } else if (this.la.type === TokenType.ScopeRes) {
+          tokens.push({ resolved: "::", raw: "::" });
+          this.adv();
+          nameIdent = "";
+          lastIdentIdx = -1;
+          hasNameAngleBracket = false;
+          continue;
+        } else if ((this.la.type as number) === TokenType.ScopeRes) {
+          tokens.push({ resolved: "::", raw: "::" });
+          this.adv();
+          nameIdent = "";
+          lastIdentIdx = -1;
+          continue;
+        } else if (v === "<") {
+          // Part of type (e.g., allocator<T>)
+          angleDepth++;
+          tokens.push({ resolved: "<", raw: "<" });
+          this.adv();
+          this.skipBalancedNoCollect("<", ">");
+          angleDepth--;
+          tokens.push({ resolved: ">", raw: ">" });
+          continue;
+        } else {
+          tokens.push({ resolved: v, raw: v });
+          this.adv();
+          continue;
+        }
+      }
+
+      if (state === "params") {
+        if (v === "(") {
+          paramDepth++;
+          paramText += "( ";
+          this.adv();
+          continue;
+        } else if (v === ")") {
+          paramDepth--;
+          if (paramDepth > 0) {
+            paramText += ") ";
+          }
+          this.adv();
+          if (paramDepth === 0) {
+            state = "afterParams";
+          }
+          continue;
+        } else {
+          paramText += this.resolved(this.la) + " ";
+          this.adv();
+          continue;
+        }
+      }
+
+      if (state === "afterParams") {
+        if (this.la.type === TokenType.Arrow) {
+          isDeductionGuide = true;
+          this.adv();
+          while (!this.eof() && !this.isP(";") && !this.isP("{")) {
+            trailingRT += this.resolved(this.la) + " ";
+            this.adv();
+          }
+          break;
+        } else if (v === ";") {
+          break;
+        } else if (v === "{") {
+          break;
+        } else if (this.isId("noexcept")) {
+          this.adv();
+          if (this.isP("(")) this.skipBalancedNoCollect("(", ")");
+          continue;
+        } else if (this.isId("requires")) {
+          this.adv();
+          this.skipRequiresExpression();
+          continue;
+        } else if (
+          this.isId("const") ||
+          this.isId("override") ||
+          this.isId("final")
+        ) {
+          this.adv();
+          continue;
+        } else if (v === "&" || v === "&&") {
+          this.adv();
+          continue;
+        } else {
+          this.adv();
+          continue;
+        }
+      }
+
+      this.adv();
+    }
+
+    // Analyze
+    if (!sawOpenParen) {
+      // Variable
+      if (nameIdent) {
+        returnType = tokens
+          .slice(0, lastIdentIdx >= 0 ? lastIdentIdx : undefined)
+          .filter((t) => t.resolved.trim().length > 0)
+          .map((t) => t.resolved)
+          .join(" ")
+          .trim();
+        return {
+          name: nameIdent,
+          kind: hasNameAngleBracket ? "variable" : "variable",
+          returnType,
+          parameters: [],
+          hasTemplateArgsOnName: hasNameAngleBracket,
+        };
+      }
+      return null;
+    }
+
+    // Function or deduction guide
+    returnType = tokens
+      .slice(0, lastIdentIdx >= 0 ? lastIdentIdx : undefined)
+      .filter((t) => t.resolved.trim().length > 0)
+      .map((t) => t.resolved)
+      .join(" ")
+      .trim();
+
+    const params = this.splitParams(paramText);
+
+    if (isDeductionGuide) {
+      return {
+        name: nameIdent,
+        kind: "deductionGuide",
+        returnType,
+        parameters: params,
+        hasTemplateArgsOnName: hasNameAngleBracket,
+      };
+    }
+
+    return {
+      name: nameIdent,
+      kind: "function",
+      returnType,
+      parameters: params,
+      hasTemplateArgsOnName: hasNameAngleBracket,
+    };
   }
-}
 
-function parseTypedef(s: string, ctx: ParseContext, symbols: SymbolEntry[]): void {
-  const m = s.match(/^typedef\s+.*\s+(\w+)\s*;/);
-  if (m) {
-    symbols.push(makeSym(ctx, m[1], "typeAlias", undefined, undefined, s));
-  } else {
-    const lastId = extractLastIdentifier(s.replace(/;$/, ""));
-    if (lastId) symbols.push(makeSym(ctx, lastId, "typeAlias", undefined, undefined, s));
+  private emitDeclarator(
+    info: DeclaratorInfo,
+    specs: SpecifierSet,
+    tInfo: TemplateInfo | null,
+  ): void {
+    if (info.kind === "deductionGuide") {
+      this.push(
+        this.makeSym(info.name, "deductionGuide", tInfo, undefined, undefined, {
+          constructorName: info.name,
+          parameters: info.parameters,
+          targetType: info.returnType,
+        }),
+      );
+      if (this.isP(";")) this.adv();
+      return;
+    }
+
+    if (info.kind === "function") {
+      if (info.hasTemplateArgsOnName) {
+        this.push(
+          this.makeSym(
+            info.name,
+            tInfo?.isFullSpecialization
+              ? "fullTemplateSpecialization"
+              : "partialTemplateSpecialization",
+            tInfo,
+            info.returnType || undefined,
+            undefined,
+          ),
+        );
+      } else {
+        const kind: SymbolKind = tInfo ? "functionTemplate" : "function";
+        this.push(
+          this.makeSym(
+            info.name,
+            kind,
+            tInfo,
+            info.returnType || undefined,
+            undefined,
+            {
+              returnType: info.returnType || "",
+              parameters: info.parameters,
+              constexpr: specs.constexpr || undefined,
+            },
+          ),
+        );
+      }
+      // Skip function body if { ... }
+      if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+      if (this.isP(";")) this.adv();
+      return;
+    }
+
+    // Variable
+    if (info.hasTemplateArgsOnName && tInfo) {
+      this.push(
+        this.makeSym(
+          info.name,
+          tInfo.isFullSpecialization
+            ? "fullTemplateSpecialization"
+            : "partialTemplateSpecialization",
+          tInfo,
+          info.returnType || undefined,
+          undefined,
+        ),
+      );
+    } else {
+      const kind: SymbolKind = tInfo ? "variableTemplate" : "variable";
+      this.push(
+        this.makeSym(
+          info.name,
+          kind,
+          tInfo,
+          info.returnType || undefined,
+          undefined,
+          {
+            type: info.returnType || "",
+            constexpr: specs.constexpr || undefined,
+            inline: specs.inline || undefined,
+            extern: specs.extern || undefined,
+          },
+        ),
+      );
+    }
+    // Skip initializer
+    if (this.isP("=")) {
+      this.adv();
+      this.skipInitializer();
+    }
+    if (this.isP(";")) this.adv();
   }
-}
 
-function parseTypeAlias(
-  s: string,
-  templateParams: string | undefined,
-  ctx: ParseContext,
-  symbols: SymbolEntry[],
-): void {
-  const m = s.match(/^using\s+(\w+)\s*=\s*/);
-  if (m) {
-    const rhs = s.replace(/^using\s+\w+\s*=\s*/, "").replace(/;$/, "").trim();
-    const kind: SymbolKind = templateParams ? "variableTemplate" : "typeAlias";
-    symbols.push(makeSym(ctx, m[1], kind, templateParams, rhs, s));
+  // ---- Operator ----
+
+  private parseOperator(specs: SpecifierSet, tInfo: TemplateInfo | null): void {
+    // Collect return type tokens until "operator"
+    let returnType = "";
+    while (
+      !this.eof() &&
+      !(this.la.type === TokenType.Identifier && this.la.value === "operator")
+    ) {
+      returnType += (returnType ? " " : "") + this.resolved(this.la);
+      this.adv();
+    }
+    returnType = returnType.trim();
+
+    if (!this.isId("operator")) {
+      this.skipToSemicolonOrBrace();
+      if (this.isP(";")) this.adv();
+      return;
+    }
+    this.adv(); // consume "operator"
+
+    let opName = "";
+    let explicitConv = specs.explicit;
+
+    // Determine which operator
+    if (this.isP("(")) {
+      // operator() - call operator
+      this.adv();
+      if (this.isP(")")) {
+        opName = "()";
+        this.adv();
+      }
+    } else if (this.isP("[")) {
+      this.adv();
+      if (this.isP("]")) {
+        opName = "[]";
+        this.adv();
+      }
+    } else if (this.la.type === TokenType.Arrow) {
+      opName = "->";
+      this.adv();
+      if (this.isP("*")) {
+        opName = "->*";
+        this.adv();
+      }
+    } else if (
+      (this.la.type as number) === TokenType.StringLiteral &&
+      this.la.value.startsWith('"')
+    ) {
+      // operator""suffix
+      let sv = this.la.value;
+      // Extract suffix from string literal like ""sv or "sv"
+      sv = sv.replace(/^"/, "").replace(/"$/, "");
+      opName = 'operator""' + sv;
+      this.adv();
+    } else if (this.la.type === TokenType.Identifier) {
+      // Conversion operator: operator int, operator bool, operator basic_string, etc.
+      opName = this.resolved(this.la);
+      this.adv();
+      // Could be qualified: operator std::size_t
+      while ((this.la.type as number) === TokenType.ScopeRes) {
+        opName += "::";
+        this.adv();
+        if (
+          this.la.type === TokenType.Identifier ||
+          this.la.type === TokenType.LatexEscape
+        ) {
+          opName += this.resolved(this.la);
+          this.adv();
+        }
+      }
+      // Template type: operator vector<T>
+      if (this.isP("<")) {
+        // Skip template args
+        this.skipBalancedNoCollect("<", ">");
+      }
+    } else if (
+      this.la.type === TokenType.Punct &&
+      "+-*/%^&|~!=<>".includes(this.la.value)
+    ) {
+      // Symbolic operator: + - * / % ^ & | ~ ! = < >
+      // Could be compound: ++ -- += -= *= /= %= ^= &= |= <<= >>=
+      opName = this.la.value;
+      this.adv();
+      // Accumulate more punct chars that form compound operators
+      const compoundOps = [
+        "<<=",
+        ">>=",
+        "<=",
+        ">=",
+        "&&",
+        "||",
+        "==",
+        "!=",
+        "+=",
+        "-=",
+        "*=",
+        "/=",
+        "%=",
+        "^=",
+        "&=",
+        "|=",
+        "++",
+        "--",
+        "<<",
+        ">>",
+        "<=>",
+      ];
+      // Try to extend
+      while (
+        !this.eof() &&
+        this.la.type === TokenType.Punct &&
+        "+-*/%^&|~!=<>".includes(this.la.value)
+      ) {
+        const candidate = opName + this.la.value;
+        if (
+          compoundOps.some((co) => co.startsWith(candidate) || candidate === co)
+        ) {
+          opName += this.la.value;
+          this.adv();
+        } else {
+          break;
+        }
+      }
+    } else if (this.la.type === TokenType.Ellipsis) {
+      // Not a real C++ operator, but handle gracefully
+      opName = "...";
+      this.adv();
+    } else if (this.isP("~")) {
+      opName = "~";
+      this.adv();
+      // Usually followed by class name: ~ClassName()
+      if ((this.la.type as number) === TokenType.Identifier) {
+        opName += this.resolved(this.la);
+        this.adv();
+      }
+    }
+
+    // Parse parameter list
+    const params = this.parseParameterList();
+
+    // Skip trailing: noexcept, requires, const, &, &&, override, final
+    this.skipFunctionTrailing();
+
+    const kind: SymbolKind = tInfo ? "operatorTemplate" : "operator";
+    this.push(
+      this.makeSym(
+        "operator" + opName,
+        kind,
+        tInfo,
+        returnType || undefined,
+        undefined,
+        {
+          operator: opName,
+          explicit: explicitConv || undefined,
+          parameters: params,
+        },
+      ),
+    );
+
+    if (this.isP("{")) this.skipBalancedNoCollect("{", "}");
+    if (this.isP(";")) this.adv();
   }
-}
 
-function parseUsingDecl(
-  s: string,
-  templateParams: string | undefined,
-  ctx: ParseContext,
-  symbols: SymbolEntry[],
-): void {
-  const m = s.match(/^using\s+([\w:]+)/);
-  if (m) {
-    const name = m[1].includes("::") ? m[1].split("::").pop()! : m[1];
-    symbols.push(makeSym(ctx, name, "usingDeclaration", templateParams, undefined, s));
+  // ---- Parameter list ----
+
+  private parseParameterList(): string[] {
+    if (!this.isP("(")) return [];
+    const raw = this.skipBalanced("(", ")");
+    let inner = raw.trim();
+    if (inner.startsWith("(")) inner = inner.slice(1);
+    if (inner.endsWith(")")) inner = inner.slice(0, -1);
+    return this.splitParams(inner);
   }
-}
 
-function parseOperator(
-  s: string,
-  templateParams: string | undefined,
-  ctx: ParseContext,
-  symbols: SymbolEntry[],
-): void {
-  const opPatterns = [
-    /operator\s*\(\s*\)/,
-    /operator\s*\[\s*\]/,
-    /operator\s*->/,
-    /operator\s*""\s*\w+/,
-    /operator\s+"'[^']*'/,
-    /operator\s*([^({[\s;=,]+)\s*\(/,
-    /operator\s*(\(\))\s*\(/,
-    /operator\s*(\[\])\s*\(/,
-  ];
+  private splitParams(text: string): string[] {
+    const t = text.trim();
+    if (!t) return [];
+    const params: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of t) {
+      if (ch === "(" || ch === "<" || ch === "[") depth++;
+      else if (ch === ")" || ch === ">" || ch === "]") depth--;
+      if (ch === "," && depth === 0) {
+        const p = current.trim();
+        if (p) params.push(p);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    const p = current.trim();
+    if (p) params.push(p);
+    return params;
+  }
 
-  let opName = "";
-  for (const pat of opPatterns) {
-    const m = s.match(pat);
-    if (m) {
-      if (pat === opPatterns[0]) opName = "operator()";
-      else if (pat === opPatterns[1]) opName = "operator[]";
-      else if (pat === opPatterns[2]) opName = "operator->";
-      else if (pat === opPatterns[3]) {
-        const m2 = s.match(/operator\s*""\s*(\w+)/);
-        opName = m2 ? 'operator""' + m2[1] : 'operator""';
-      } else if (pat === opPatterns[4]) {
-        const m2 = s.match(/operator\s*('[^']*')/);
-        opName = m2 ? "operator" + m2[1] : "operator''";
-      } else if (pat === opPatterns[5]) {
-        opName = "operator" + m[1].trim();
-      } else if (pat === opPatterns[6]) {
-        opName = "operator()";
-      } else if (pat === opPatterns[7]) {
-        opName = "operator[]";
+  private skipFunctionTrailing(): void {
+    while (!this.eof()) {
+      if (this.isId("noexcept")) {
+        this.adv();
+        if (this.isP("(")) this.skipBalancedNoCollect("(", ")");
+        continue;
+      }
+      if (
+        this.isId("const") ||
+        this.isId("override") ||
+        this.isId("final") ||
+        this.isId("volatile")
+      ) {
+        this.adv();
+        continue;
+      }
+      if (this.isP("&")) {
+        this.adv();
+        continue;
+      }
+      if (this.isP("{")) {
+        this.skipBalancedNoCollect("{", "}");
+        return;
+      }
+      if (this.isP(";")) return;
+      if (this.isId("requires")) {
+        this.adv();
+        this.skipRequiresExpression();
+        continue;
+      }
+      // Check for && (rvalue ref qualifier)
+      if (this.la.value === "&&") {
+        this.adv();
+        continue;
       }
       break;
     }
   }
 
-  if (!opName) {
-    const litMatch = s.match(/operator\s*""(\w+)/);
-    if (litMatch) opName = 'operator""' + litMatch[1];
-  }
-  if (!opName) {
-    opName = "operator";
-  }
+  // ---- Helpers ----
 
-  const kind: SymbolKind = templateParams ? "functionTemplate" : "operator";
-  symbols.push(makeSym(ctx, opName, kind, templateParams, undefined, s));
-}
-
-function isOperatorDeclaration(stmt: string): boolean {
-  const s = stripSpecifiersAll(stmt);
-  if (/operator\s*[([\w<>]/.test(s)) return true;
-  if (/operator\s*""\s*[_a-zA-Z]/.test(s)) return true;
-  return false;
-}
-
-function findMatchingParen(s: string, start: number): number {
-  const idx = s.indexOf("(", start);
-  if (idx === -1) return -1;
-  let depth = 0;
-  for (let i = idx; i < s.length; i++) {
-    if (s[i] === "(") depth++;
-    if (s[i] === ")") depth--;
-    if (depth === 0) return idx;
-  }
-  return -1;
-}
-
-function stripSpecifiersAll(s: string): string {
-  const specifiers = "inline|constexpr|consteval|constinit|static|virtual|explicit|friend|volatile|extern|thread_local|mutable";
-  const specRe = new RegExp(`^(?:(?:${specifiers})\\s+)*`, "s");
-  return s.replace(specRe, "").trim();
-}
-
-function isFunctionish(s: string): boolean {
-  const stripped = stripSpecifiersAll(s);
-  const parenIdx = findMatchingParen(stripped, 0);
-  if (parenIdx <= 0) return false;
-  const beforeParen = stripped.substring(0, parenIdx).trimEnd();
-  const lastWord = beforeParen.match(/(\w+)\s*$/);
-  if (lastWord && !isFunctionishKeyword(lastWord[1])) return true;
-  if (/[*&]\s*$/.test(beforeParen)) return true;
-  return false;
-}
-
-function isFunctionishKeyword(w: string): boolean {
-  return ["class", "struct", "union", "enum", "namespace", "using", "typedef", "template", "concept", "if", "else", "for", "while", "do", "switch", "case", "return", "static_assert", "extern", "volatile", "const", "constexpr", "inline", "friend", "operator"].includes(w);
-}
-
-function extractFunctionName(s: string): string | null {
-  const stripped = stripSpecifiersAll(s);
-  const parenIdx = findMatchingParen(stripped, 0);
-  if (parenIdx <= 0) return null;
-  const beforeParen = stripped.substring(0, parenIdx).trimEnd();
-  const lastWord = beforeParen.match(/(\w+)\s*$/);
-  return lastWord ? lastWord[1] : null;
-}
-
-function tryParseFunction(s: string, ctx: ParseContext): SymbolEntry | null {
-  if (isOperatorDeclaration(s)) return null;
-  if (!isFunctionish(s)) return null;
-
-  const name = extractFunctionName(s);
-  if (name) {
-    return makeSym(ctx, name, "function", undefined, undefined, s);
+  private readIdentOrLatex(): string {
+    if (this.la.type === TokenType.Identifier) {
+      const v = this.la.value;
+      this.adv();
+      return v;
+    }
+    if (this.la.type === TokenType.LatexEscape) {
+      const v = resolveLatex(this.la);
+      this.adv();
+      if (v.includes("::")) return v.split("::").pop()!;
+      return v;
+    }
+    return "";
   }
 
-  const stripped = stripSpecifiersAll(s);
-  const funcMatch = stripped.match(/^([\w:&*]+(?:<[^>]*>)?)\s+(\w+)\s*\(/);
-  if (funcMatch) {
-    return makeSym(ctx, funcMatch[2], "function", undefined, funcMatch[1], s);
+  private readQualifiedIdent(): string {
+    let name = "";
+    while (!this.eof()) {
+      if (
+        this.la.type === TokenType.Identifier ||
+        this.la.type === TokenType.LatexEscape
+      ) {
+        name += this.resolved(this.la);
+        this.adv();
+      } else if (this.la.type === TokenType.ScopeRes) {
+        name += "::";
+        this.adv();
+      } else if (this.isP("<")) {
+        this.skipBalancedNoCollect("<", ">");
+      } else {
+        break;
+      }
+    }
+    return name;
   }
 
-  return null;
+  private combineTI(
+    outer: TemplateInfo | null,
+    inner: TemplateInfo,
+  ): TemplateInfo {
+    if (!outer) return inner;
+    return {
+      templateParams: [...outer.templateParams, ...inner.templateParams],
+      templateRequires: outer.templateRequires || inner.templateRequires,
+      isFullSpecialization:
+        outer.isFullSpecialization || inner.isFullSpecialization,
+    };
+  }
+
+  private push(entry: SymbolEntry): void {
+    this.symbols.push(entry);
+  }
+
+  private makeSym(
+    name: string,
+    kind: SymbolKind,
+    tInfo: TemplateInfo | null,
+    typeInfo?: string,
+    raw?: string,
+    extra?: Record<string, any>,
+  ): SymbolEntry {
+    const entry: Record<string, any> = {
+      header: this.header,
+      namespace: this.nsStack.join("::") || "std",
+      name,
+      kind,
+    };
+    if (this.inlineUnspec) entry.inlineUnspecifiedNamespace = true;
+    if (this.langLinkage) entry.languageLinkage = this.langLinkage;
+    if (tInfo && !tInfo.isFullSpecialization) {
+      entry.templateParams = tInfo.templateParams;
+      if (tInfo.templateRequires)
+        entry.templateRequires = tInfo.templateRequires;
+    }
+    if (typeInfo) entry.type_info = typeInfo;
+    entry.raw = (raw ?? name).substring(0, 500);
+    if (extra) {
+      for (const [k, v] of Object.entries(extra)) {
+        if (v !== undefined && v !== false) entry[k] = v;
+      }
+    }
+    return entry as SymbolEntry;
+  }
 }
 
-function tryParseVariable(s: string, ctx: ParseContext): SymbolEntry | null {
-  if (isFunctionish(s)) return null;
-  if (isOperatorDeclaration(s)) return null;
+// ============================================================
+// Trailing return type tracking (needed for deduction guides)
+// ============================================================
 
-  const stripped = stripSpecifiersAll(s);
+// The emitDeclarator function needs the trailingRT variable from scanDeclarator,
+// but it's not directly accessible. We'll pass it through the info object instead.
 
-  const varMatch = stripped.match(/^([\w:]+(?:<[^>]*>)?(?:\s*[*&]+)?)\s+(\w+)\s*(?:=|;)/);
-  if (varMatch) {
-    const kw = ["class", "struct", "union", "enum", "namespace", "using", "typedef", "template", "concept", "if", "else", "for", "while", "do", "switch", "case", "return", "static_assert", "void", "operator"];
-    if (!kw.includes(varMatch[2])) {
-      return makeSym(ctx, varMatch[2], "variable", undefined, varMatch[1].trim(), s);
+// Override DeclaratorInfo to include trailingReturn
+interface DeclaratorInfoFull extends DeclaratorInfo {
+  trailingReturnType?: string;
+}
+
+// ============================================================
+// Preprocessing
+// ============================================================
+
+interface PreprocessResult {
+  preprocessedCode: string;
+  macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
+}
+
+function preprocessCode(code: string, header: string): PreprocessResult {
+  const symbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[] = [];
+  const lines = code.split("\n");
+
+  // join lines with backslashes
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.endsWith("\\")) {
+      // Join with next line
+      if (i + 1 < lines.length) {
+        lines[i] = line.slice(0, -1) + lines[i + 1];
+        lines.splice(i + 1, 1);
+        i--; // reprocess this line in case of multiple continuations
+      }
     }
   }
 
-  return null;
-}
-
-function makeSym(
-  ctx: ParseContext,
-  name: string,
-  kind: SymbolKind,
-  templateParams?: string,
-  typeInfo?: string,
-  raw?: string,
-): SymbolEntry {
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    const resolved = resolveLaTeXInText(line);
+    const directive = /^#\s*(\w+)(.*)$/.exec(resolved);
+    if (directive) {
+      // preprocessor directive
+      const [, directiveName, rest] = directive;
+      if (directiveName === "define") {
+        // Extract macro name and parameters
+        const match = rest.match(/^\s*(\w+)(?:\(([^)]*)\))?/);
+        if (!match) {
+          console.warn(`#define regex matching failed: ${rest}`);
+          continue;
+        }
+        const namespace = ""; // macros should not have namespace
+        const [, name, parameterStr] = match;
+        if (parameterStr) {
+          const parameters = parameterStr
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          symbols.push({
+            header,
+            namespace,
+            name,
+            kind: "functionLikeMacro",
+            raw: resolved,
+            parameters,
+          });
+        } else {
+          symbols.push({
+            header,
+            namespace,
+            name,
+            kind: "macro",
+            raw: resolved,
+          });
+        }
+      }
+    }
+    // preprocessed
+    lines[i] = "";
+  }
   return {
-    header: ctx.header,
-    namespace: ctx.namespaceStack.join("::") || "std",
-    name,
-    kind,
-    ...(templateParams ? { template_params: templateParams } : {}),
-    ...(typeInfo ? { type_info: typeInfo } : {}),
-    ...(raw ? { raw: raw.substring(0, 500) } : { raw: name }),
+    preprocessedCode: lines.join("\n"),
+    macroSymbols: symbols,
   };
 }
 
-function extractIdentifier(s: string): string {
-  const m = s.match(/([a-zA-Z_]\w*)/);
-  return m ? m[1] : "";
-}
+// ============================================================
+// Public API
+// ============================================================
 
-function extractLastIdentifier(s: string): string {
-  const m = s.match(/([a-zA-Z_]\w*)\s*$/);
-  return m ? m[1] : "";
-}
+export function parseCodeblock(code: string, header: string): SymbolEntry[] {
+  // (because @...@ LaTeX escapes interfere with token-level #define parsing)
+  const { preprocessedCode, macroSymbols } = preprocessCode(code, header);
 
-function guessKind(s: string): SymbolKind {
-  if (/^(class|struct|union)\s/.test(s)) return "class";
-  if (/^enum/.test(s)) return "enum";
-  if (/^concept\s/.test(s)) return "concept";
-  if (/^typedef\s/.test(s)) return "typeAlias";
-  if (/^using\s/.test(s)) return "typeAlias";
-  if (/#define/.test(s)) return "macro";
-  if (/operator/.test(s)) return "operator";
-  if (/\(/.test(s) && !/=\s*\[/.test(s)) return "function";
-  return "variable";
+  // TODO DEBUG
+  return macroSymbols;
+
+  const lexer = new Lexer(preprocessedCode);
+  const parser = new Parser(lexer, header);
+  parser.parseTopLevel();
+
+  // Merge macro symbols at the beginning
+  return [...macroSymbols, ...parser.symbols];
 }
