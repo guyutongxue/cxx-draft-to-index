@@ -1,14 +1,15 @@
 import type { IndexOutput, HeaderIndex, SymbolEntry } from "./types";
-import { fetchAllTexFiles, extractHeaderSynopses } from "./latex";
+import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
 import { parseCodeblock } from "./cpp-parser";
 
 const OUTPUT_FILE = "dist/std-index.json";
-const CACHE_DIR = ".tex-cache";
 
 async function main() {
   console.log("C++ Draft to Index: Generating std symbol index...\n");
 
-  const texFiles = await fetchAllTexFiles((msg) => console.log(msg));
+  console.log(`Loading .tex files from C++ draft...`);
+  const texFiles = await loadAllTexFiles();
+  console.log(`Loaded ${texFiles.size} .tex files.\n`);
 
   console.log(`\nExtracting header synopses...`);
   const synopses = extractHeaderSynopses(texFiles);
