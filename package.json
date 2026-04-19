@@ -1,0 +1,12 @@
+{
+  "name": "cxx-draft-to-index",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "bun run src/main.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.12"
+  }
+}
