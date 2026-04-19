@@ -36,23 +36,41 @@ export interface Token {
 const PUNCT_CHARS = new Set("{}()[],;:=*%+!~^&.|/<>?#@".split(""));
 
 export class Lexer {
-  public src: string;
-  public pos: number;
-  public line: number;
-  public col: number;
-  public cur: number;
+  private readonly src: string;
+  private pos: number;
+  private line: number;
+  private col: number;
+  /** src.length */
+  private readonly srcLen: number;
 
   constructor(src: string) {
     this.src = src;
     this.pos = 0;
     this.line = 1;
     this.col = 1;
-    this.cur = this.src.length;
+    this.srcLen = this.src.length;
   }
 
-  private ch(offset: number = 0): string {
-    const idx = this.pos + offset;
-    return idx < this.cur ? this.src[idx] : "\0";
+  clone(): Lexer {
+    const cloned = new Lexer(this.src);
+    cloned.pos = this.pos;
+    cloned.line = this.line;
+    cloned.col = this.col;
+    // @ts-expect-error assign to readonly prop
+    cloned.srcLen = this.srcLen;
+    return cloned;
+  }
+
+  /**
+   * character at `this.pos + offset`
+   * @param [offset=0]
+   */
+  private get ch(): string {
+    return this.pos < this.srcLen ? this.src[this.pos] : "\0";
+  }
+
+  private getN(size: number): string {
+    return this.src.slice(this.pos, Math.min(this.pos + size, this.srcLen));
   }
 
   private advance(): string {
@@ -68,17 +86,17 @@ export class Lexer {
   }
 
   private skipWhitespaceAndComments(): void {
-    while (this.pos < this.cur) {
-      const c = this.ch();
+    while (this.pos < this.srcLen) {
+      const c = this.ch;
       if (c === " " || c === "\t" || c === "\r" || c === "\n") {
         this.advance();
-      } else if (c === "/" && this.ch(1) === "/") {
-        while (this.pos < this.cur && this.ch() !== "\n") this.advance();
-      } else if (c === "/" && this.ch(1) === "*") {
+      } else if (this.getN(2) === "//") {
+        while (this.pos < this.srcLen && this.ch !== "\n") this.advance();
+      } else if (this.getN(2) === "/*") {
         this.advance();
         this.advance();
-        while (this.pos < this.cur) {
-          if (this.ch() === "*" && this.ch(1) === "/") {
+        while (this.pos < this.srcLen) {
+          if (this.getN(2) === "*/") {
             this.advance();
             this.advance();
             break;
@@ -94,70 +112,78 @@ export class Lexer {
   next(): Token {
     this.skipWhitespaceAndComments();
 
-    if (this.pos >= this.cur) {
+    if (this.pos >= this.srcLen) {
       return { type: TokenType.EOF, value: "", line: this.line, col: this.col };
     }
 
+    /** start line */
     const sl = this.line;
+    /** start col */
     const sc = this.col;
-    const c = this.ch();
+    const c = this.ch;
 
     // @...@ LaTeX escape
     if (c === "@") {
       this.advance();
-      let val = "@";
-      while (this.pos < this.cur && this.ch() !== "@") val += this.advance();
-      if (this.pos < this.cur) val += this.advance();
-      return { type: TokenType.LatexEscape, value: val, line: sl, col: sc };
+      let value = "@";
+      while (this.pos < this.srcLen && this.ch !== "@") {
+        value += this.advance();
+      }
+      if (this.pos < this.srcLen) {
+        value += this.advance();
+      }
+      return { type: TokenType.LatexEscape, value, line: sl, col: sc };
     }
 
     // String literal
     if (c === '"') {
-      let val = this.advance();
-      while (this.pos < this.cur) {
+      let value = this.advance();
+      while (this.pos < this.srcLen) {
         const x = this.advance();
-        val += x;
-        if (x === '"' && val[val.length - 2] !== "\\") break;
+        value += x;
+        if (x === '"' && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.StringLiteral, value: val, line: sl, col: sc };
+      return { type: TokenType.StringLiteral, value, line: sl, col: sc };
     }
 
     // Char literal
     if (c === "'") {
-      let val = this.advance();
-      while (this.pos < this.cur) {
+      let value = this.advance();
+      while (this.pos < this.srcLen) {
         const x = this.advance();
-        val += x;
-        if (x === "'" && val[val.length - 2] !== "\\") break;
+        value += x;
+        if (x === "'" && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.CharLiteral, value: val, line: sl, col: sc };
+      return { type: TokenType.CharLiteral, value: value, line: sl, col: sc };
     }
 
     // Number
     if (c >= "0" && c <= "9") {
-      let val = "";
-      while (this.pos < this.cur && /[0-9a-fA-FxX.'_]/.test(this.ch()))
-        val += this.advance();
-      return { type: TokenType.Number, value: val, line: sl, col: sc };
+      let value = "";
+      while (this.pos < this.srcLen && /[0-9a-fA-FxX.'_]/.test(this.ch))
+        value += this.advance();
+      return { type: TokenType.Number, value: value, line: sl, col: sc };
     }
 
     // Identifier / keyword
+    const isIdentifierPart = (ch: string) => {
+      return (
+        ch === "_" ||
+        (ch >= "a" && ch <= "z") ||
+        (ch >= "A" && ch <= "Z") ||
+        (ch >= "0" && ch <= "9")
+      );
+    };
     if (c === "_" || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
-      let val = "";
-      while (
-        this.pos < this.cur &&
-        (this.ch() === "_" ||
-          (this.ch() >= "a" && this.ch() <= "z") ||
-          (this.ch() >= "A" && this.ch() <= "Z") ||
-          (this.ch() >= "0" && this.ch() <= "9"))
-      ) {
-        val += this.advance();
+      let value = "";
+      while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
+        value += this.advance();
       }
-      return { type: TokenType.Identifier, value: val, line: sl, col: sc };
+      return { type: TokenType.Identifier, value: value, line: sl, col: sc };
     }
 
     // ...
-    if (c === "." && this.ch(1) === "." && this.ch(2) === ".") {
+    if (this.getN(3) === "...") {
       this.advance();
       this.advance();
       this.advance();
@@ -165,18 +191,20 @@ export class Lexer {
     }
 
     // ->
-    if (c === "-" && this.ch(1) === ">") {
+    if (this.getN(2) === "->") {
       this.advance();
       this.advance();
-      return { type: TokenType.Arrow, value: "->", line: sc, col: sc };
+      return { type: TokenType.Arrow, value: "->", line: sl, col: sc };
     }
 
     // ::
-    if (c === ":" && this.ch(1) === ":") {
+    if (this.getN(2) === "::") {
       this.advance();
       this.advance();
       return { type: TokenType.ScopeRes, value: "::", line: sl, col: sc };
     }
+
+    // TODO do we have any multiple char punctuators not handled yet?
 
     // Single-char punctuation
     if (PUNCT_CHARS.has(c)) {
@@ -184,9 +212,7 @@ export class Lexer {
       return { type: TokenType.Punct, value: c, line: sl, col: sc };
     }
 
-    // Fallback: skip unknown
-    this.advance();
-    return this.next();
+    throw new Error(`Unknown token: \`${this.getN(10)}\` ...`);
   }
 
   peekToken(): Token {
@@ -241,7 +267,6 @@ const LATEX_BRACED: [RegExp, string][] = [
   [/^\\placeholder\{([^}]+)\}$/g, "$1"],
   [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
 
-
   // [/^\\tcode\{([^}]*)\}$/g, "$1"],
   // [/^\\keyword\{([^}]+)\}$/g, "$1"],
   // [/^\\term\{([^}]+)\}$/g, "$1"],
@@ -249,7 +274,6 @@ const LATEX_BRACED: [RegExp, string][] = [
   // alignment
   [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
 ];
-
 
 function resolveSingleLaTeX(text: string): string {
   if (typeof LATEX_SIMPLE[text] === "string") {
@@ -300,54 +324,6 @@ function resolveLaTeXInText(text: string): string {
   return result;
 }
 
-// ============================================================
-// Specifier tracking
-// ============================================================
-
-interface SpecifierSet {
-  inline: boolean;
-  constexpr: boolean;
-  constinit: boolean;
-  static: boolean;
-  virtual: boolean;
-  explicit: boolean;
-  friend: boolean;
-  volatile: boolean;
-  extern: boolean;
-  thread_local: boolean;
-  mutable: boolean;
-}
-
-const SPECIFIER_KW = new Set([
-  "inline",
-  "constexpr",
-  "consteval",
-  "constinit",
-  "static",
-  "virtual",
-  "explicit",
-  "friend",
-  "volatile",
-  "extern",
-  "thread_local",
-  "mutable",
-]);
-
-function emptySpecs(): SpecifierSet {
-  return {
-    inline: false,
-    constexpr: false,
-    constinit: false,
-    static: false,
-    virtual: false,
-    explicit: false,
-    friend: false,
-    volatile: false,
-    extern: false,
-    thread_local: false,
-    mutable: false,
-  };
-}
 
 // ============================================================
 // Template info
@@ -371,28 +347,63 @@ interface DeclaratorInfo {
   hasTemplateArgsOnName: boolean;
 }
 
+function defer(fn: () => void): Disposable {
+  return {
+    [Symbol.dispose]() {
+      return fn();
+    }
+  }
+}
+
+interface DeclarationContext {
+  specifier: DeclarationSpecifierSet;
+}
+
+const DECLARATION_SPECIFIERS = [
+  // storage-class-specifier
+  "static",
+  "thread_local",
+  "extern",
+  "mutable",
+  // defining-type-specifier
+  // -> simple-type-specifier
+  // -> typename-specifier
+  "typename",
+  // -> cv-qualifier
+  "const",
+  "volatile",
+  // -> class-specifier
+  
+] as const;
+
 // ============================================================
 // Parser
 // ============================================================
 
 export class Parser {
-  private lexer: Lexer;
-  private header: string;
-  private nsStack: string[];
-  private inlineUnspec: boolean;
-  private langLinkage: "C" | "C++" | null;
+  private readonly lexer: Lexer;
+  private readonly header: string;
+  private readonly nsStack: string[];
+  
+  private readonly declCtxStack: DeclarationContext[];
+
   symbols: SymbolEntry[];
+
+
+
+  /** current token */
   private la: Token;
   private savedPos: number;
+  /** 1-based */
   private savedLine: number;
+  /** 1-based */
   private savedCol: number;
 
   constructor(lexer: Lexer, header: string) {
     this.lexer = lexer;
     this.header = header;
     this.nsStack = [];
-    this.inlineUnspec = false;
-    this.langLinkage = null;
+    this.declCtxStack = [];
     this.symbols = [];
     this.la = lexer.next();
     this.savedPos = 0;
@@ -413,10 +424,12 @@ export class Parser {
     return null;
   }
 
+  /** is identifier or keyword */
   private isId(v: string): boolean {
     return this.la.type === TokenType.Identifier && this.la.value === v;
   }
 
+  /** is punctuation */
   private isP(v: string): boolean {
     return this.la.type === TokenType.Punct && this.la.value === v;
   }
@@ -720,32 +733,14 @@ export class Parser {
   // ---- Top-level ----
 
   parseTopLevel(): void {
-    let lastPos = -1;
-    let stallCount = 0;
     while (!this.eof()) {
-      const curPos = this.lexer.pos;
-      if (curPos === lastPos) {
-        stallCount++;
-        if (stallCount > 100) {
-          // Completely stuck — advance past current token
-          this.adv();
-          stallCount = 0;
-        }
-      } else {
-        lastPos = curPos;
-        stallCount = 0;
-      }
-
-      if (this.isP("}")) {
-        if (this.nsStack.length > 0) this.nsStack.pop();
-        this.adv();
-        continue;
-      }
       this.parseDeclaration(emptySpecs(), null);
     }
   }
 
-  // ---- Declaration dispatch ----
+  // ---- Declaration ----
+
+
 
   private parseDeclaration(
     specs: SpecifierSet,
@@ -944,22 +939,12 @@ export class Parser {
   // ---- Class / struct / union ----
 
   private parseClassOrStruct(
-    specs: SpecifierSet,
     tInfo: TemplateInfo | null,
   ): void {
     const classKey = this.la.value;
     if (classKey !== "class" && classKey !== "struct" && classKey !== "union")
       return;
     this.adv();
-
-    // Skip MANGLE_ON_* attributes
-    while (
-      !this.eof() &&
-      this.la.type === TokenType.Identifier &&
-      this.la.value.startsWith("MANGLE_ON_")
-    ) {
-      this.adv();
-    }
 
     const name = this.readIdentOrLatex();
     if (!name) {
@@ -1095,7 +1080,6 @@ export class Parser {
   // ---- Big disambiguator ----
 
   private parseFunctionOrVariableOrOperator(
-    specs: SpecifierSet,
     tInfo: TemplateInfo | null,
   ): void {
     // Check if current token stream starts with or contains "operator"
@@ -1120,12 +1104,7 @@ export class Parser {
 
   private detectOperator(): boolean {
     // Clone the lexer at the current position to look ahead without advancing
-    const clone = new Lexer("");
-    clone.src = this.lexer.src;
-    clone.pos = this.lexer.pos;
-    clone.line = this.lexer.line;
-    clone.col = this.lexer.col;
-    clone.cur = this.lexer.cur;
+    const clone = this.lexer.clone();
 
     let depth = 0;
     let maxScan = 80;
@@ -1146,7 +1125,6 @@ export class Parser {
   }
 
   private scanDeclarator(
-    specs: SpecifierSet,
     tInfo: TemplateInfo | null,
   ): DeclaratorInfo | null {
     // Walk tokens collecting type/name, looking for '(' to indicate function,
@@ -1345,7 +1323,6 @@ export class Parser {
 
   private emitDeclarator(
     info: DeclaratorInfo,
-    specs: SpecifierSet,
     tInfo: TemplateInfo | null,
   ): void {
     if (info.kind === "deductionGuide") {
@@ -1437,7 +1414,7 @@ export class Parser {
 
   // ---- Operator ----
 
-  private parseOperator(specs: SpecifierSet, tInfo: TemplateInfo | null): void {
+  private parseOperator(tInfo: TemplateInfo | null): void {
     // Collect return type tokens until "operator"
     let returnType = "";
     while (
@@ -1835,9 +1812,9 @@ function preprocessCode(code: string, header: string): PreprocessResult {
           });
         }
       }
+      // preprocessed
+      lines[i] = "";
     }
-    // preprocessed
-    lines[i] = "";
   }
   return {
     preprocessedCode: lines.join("\n"),
@@ -1853,8 +1830,10 @@ export function parseCodeblock(code: string, header: string): SymbolEntry[] {
   // (because @...@ LaTeX escapes interfere with token-level #define parsing)
   const { preprocessedCode, macroSymbols } = preprocessCode(code, header);
 
-  // TODO DEBUG
-  return macroSymbols;
+  // DEBUG only check <bit> now
+  if (header !== "bit") {
+    return macroSymbols;
+  }
 
   const lexer = new Lexer(preprocessedCode);
   const parser = new Parser(lexer, header);
