@@ -3,488 +3,98 @@ import type {
   MacroSymbolEntry,
   SymbolEntry,
   SymbolKind,
-} from "./types";
+} from "../types";
+import { resolveLatex } from "./latex";
+import { Lexer, Location, Token, TokenType } from "./lexer";
+import assert from "node:assert";
 
-// ============================================================
-// Token types
-// ============================================================
-
-export enum TokenType {
-  Identifier,
-  Number,
-  StringLiteral,
-  CharLiteral,
-  Punct,
-  Ellipsis,
-  ScopeRes, // ::
-  Arrow, // ->
-  LatexEscape, // @...@
-  EOF,
+interface AttributeInfo {
+  startLoc: Location;
 }
 
-export interface Token {
-  type: TokenType;
-  value: string;
-  line: number;
-  col: number;
+interface DeclarationInfo {
+  attributes: AttributeInfo[];
 }
 
-// ============================================================
-// Lexer
-// ============================================================
+interface DeclarationGroup extends Array<DeclarationInfo> {}
 
-const PUNCT_CHARS = new Set("{}()[],;:=*%+!~^&.|/<>?#@".split(""));
-
-export class Lexer {
-  private readonly src: string;
-  private pos: number;
-  private line: number;
-  private col: number;
-  /** src.length */
-  private readonly srcLen: number;
-
-  constructor(src: string) {
-    this.src = src;
-    this.pos = 0;
-    this.line = 1;
-    this.col = 1;
-    this.srcLen = this.src.length;
-  }
-
-  clone(): Lexer {
-    const cloned = new Lexer(this.src);
-    cloned.pos = this.pos;
-    cloned.line = this.line;
-    cloned.col = this.col;
-    // @ts-expect-error assign to readonly prop
-    cloned.srcLen = this.srcLen;
-    return cloned;
-  }
-
-  /**
-   * character at `this.pos + offset`
-   * @param [offset=0]
-   */
-  private get ch(): string {
-    return this.pos < this.srcLen ? this.src[this.pos] : "\0";
-  }
-
-  private getN(size: number): string {
-    return this.src.slice(this.pos, Math.min(this.pos + size, this.srcLen));
-  }
-
-  private advance(): string {
-    const c = this.src[this.pos];
-    if (c === "\n") {
-      this.line++;
-      this.col = 1;
-    } else {
-      this.col++;
-    }
-    this.pos++;
-    return c;
-  }
-
-  private skipWhitespaceAndComments(): void {
-    while (this.pos < this.srcLen) {
-      const c = this.ch;
-      if (c === " " || c === "\t" || c === "\r" || c === "\n") {
-        this.advance();
-      } else if (this.getN(2) === "//") {
-        while (this.pos < this.srcLen && this.ch !== "\n") this.advance();
-      } else if (this.getN(2) === "/*") {
-        this.advance();
-        this.advance();
-        while (this.pos < this.srcLen) {
-          if (this.getN(2) === "*/") {
-            this.advance();
-            this.advance();
-            break;
-          }
-          this.advance();
-        }
-      } else {
-        break;
-      }
-    }
-  }
-
-  next(): Token {
-    this.skipWhitespaceAndComments();
-
-    if (this.pos >= this.srcLen) {
-      return { type: TokenType.EOF, value: "", line: this.line, col: this.col };
-    }
-
-    /** start line */
-    const sl = this.line;
-    /** start col */
-    const sc = this.col;
-    const c = this.ch;
-
-    // @...@ LaTeX escape
-    if (c === "@") {
-      this.advance();
-      let value = "@";
-      while (this.pos < this.srcLen && this.ch !== "@") {
-        value += this.advance();
-      }
-      if (this.pos < this.srcLen) {
-        value += this.advance();
-      }
-      return { type: TokenType.LatexEscape, value, line: sl, col: sc };
-    }
-
-    // String literal
-    if (c === '"') {
-      let value = this.advance();
-      while (this.pos < this.srcLen) {
-        const x = this.advance();
-        value += x;
-        if (x === '"' && value[value.length - 2] !== "\\") break;
-      }
-      return { type: TokenType.StringLiteral, value, line: sl, col: sc };
-    }
-
-    // Char literal
-    if (c === "'") {
-      let value = this.advance();
-      while (this.pos < this.srcLen) {
-        const x = this.advance();
-        value += x;
-        if (x === "'" && value[value.length - 2] !== "\\") break;
-      }
-      return { type: TokenType.CharLiteral, value: value, line: sl, col: sc };
-    }
-
-    // Number
-    if (c >= "0" && c <= "9") {
-      let value = "";
-      while (this.pos < this.srcLen && /[0-9a-fA-FxX.'_]/.test(this.ch))
-        value += this.advance();
-      return { type: TokenType.Number, value: value, line: sl, col: sc };
-    }
-
-    // Identifier / keyword
-    const isIdentifierPart = (ch: string) => {
-      return (
-        ch === "_" ||
-        (ch >= "a" && ch <= "z") ||
-        (ch >= "A" && ch <= "Z") ||
-        (ch >= "0" && ch <= "9")
-      );
-    };
-    if (c === "_" || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
-      let value = "";
-      while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
-        value += this.advance();
-      }
-      return { type: TokenType.Identifier, value: value, line: sl, col: sc };
-    }
-
-    // ...
-    if (this.getN(3) === "...") {
-      this.advance();
-      this.advance();
-      this.advance();
-      return { type: TokenType.Ellipsis, value: "...", line: sl, col: sc };
-    }
-
-    // ->
-    if (this.getN(2) === "->") {
-      this.advance();
-      this.advance();
-      return { type: TokenType.Arrow, value: "->", line: sl, col: sc };
-    }
-
-    // ::
-    if (this.getN(2) === "::") {
-      this.advance();
-      this.advance();
-      return { type: TokenType.ScopeRes, value: "::", line: sl, col: sc };
-    }
-
-    // TODO do we have any multiple char punctuators not handled yet?
-
-    // Single-char punctuation
-    if (PUNCT_CHARS.has(c)) {
-      this.advance();
-      return { type: TokenType.Punct, value: c, line: sl, col: sc };
-    }
-
-    throw new Error(`Unknown token: \`${this.getN(10)}\` ...`);
-  }
-
-  peekToken(): Token {
-    const sp = this.pos;
-    const sl = this.line;
-    const sc2 = this.col;
-    const tok = this.next();
-    this.pos = sp;
-    this.line = sl;
-    this.col = sc2;
-    return tok;
-  }
-}
-
-// ============================================================
-// LaTeX resolution
-// ============================================================
-
-const LATEX_SIMPLE: Record<string, string> = {
-  "\\seebelow": "/*see_below*/",
-  "\\seebelownc": "/*see_below*/",
-  "\\seeabove": "/*see_above*/",
-  "\\unspec": "/*unspecified*/",
-  "\\unspecnc": "/*unspecified*/",
-  "\\unspecbool": "/*unspecified-bool-type*/",
-  "\\unspecalloctype": "/*unspecified-allocator-type*/",
-  "\\unspecuniqtype": "/*unspecified-unique-type*/",
-  "\\expos": "/*exposition-only*/",
-  "\\ellip": "...",
-  "\\brk": " ",
-  "\\nocorr": "",
-};
-
-const LATEX_BRACED: [RegExp, string][] = [
-  // as-is replacement with LaTeX labels
-  [/^\\libmacro\{([^}]+)\}$/g, "$1"],
-  [/^\\defnlibxname\{([^}]+)\}$/g, "$1"],
-  [/^\\libglobal\{([^}]+)\}$/g, "$1"],
-  [/^\\global\{([^}]+)\}$/g, "$1"],
-  [/^\\deflibconcept\{([^}]+)\}$/g, "$1"],
-  [/^\\libconcept\{([^}]+)\}$/g, "$1"],
-  [/^\\ref\{([^}]+)\}$/g, ""],
-  [/^\\iref\{([^}]+)\}$/g, ""],
-
-  // exposition-only symbols, prefix with __
-  [/^\\defexposconcept\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposconcept\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposconceptnc\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposid\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposidnc\{([^}]+)\}$/g, "__$1"],
-  // placeholders, should be as-is
-  [/^\\placeholder\{([^}]+)\}$/g, "$1"],
-  [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
-
-  // [/^\\tcode\{([^}]*)\}$/g, "$1"],
-  // [/^\\keyword\{([^}]+)\}$/g, "$1"],
-  // [/^\\term\{([^}]+)\}$/g, "$1"],
-
-  // alignment
-  [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
-];
-
-function resolveSingleLaTeX(text: string): string {
-  if (typeof LATEX_SIMPLE[text] === "string") {
-    return LATEX_SIMPLE[text];
-  }
-  for (const [regex, replacement] of LATEX_BRACED) {
-    text = text.replace(regex, replacement);
-  }
-  // \textit command: replace with comment and drop its all inner LaTeX commands
-  if (text.startsWith("\\textit{") && text.endsWith("}")) {
-    text = `/* ${text.replace(/\\\w+\{|\}/g, "")} */`;
-  }
-  return text;
-}
-
-export function resolveLatex(tok: Token): string {
-  if (tok.type !== TokenType.LatexEscape) return tok.value;
-  return resolveSingleLaTeX(tok.value);
-}
-
-/**
- * Used in extract macro symbols.
- * We should ONLY call this in preprocessing
- * @param text
- * @returns
- */
-function resolveLaTeXInText(text: string): string {
-  let result = "";
-  let i = 0;
-  while (i < text.length) {
-    if (text[i] === "@") {
-      let j = i + 1;
-      while (j < text.length && text[j] !== "@") {
-        j++;
-      }
-      if (j < text.length) {
-        result += resolveSingleLaTeX(text.slice(i + 1, j));
-        i = j + 1;
-      } else {
-        result += text.slice(i);
-        break;
-      }
-    } else {
-      result += text[i];
-      i++;
-    }
-  }
-  return result;
-}
-
-
-// ============================================================
-// Template info
-// ============================================================
-
-interface TemplateInfo {
-  templateParams: string[];
-  templateRequires: string | null;
-  isFullSpecialization: boolean;
-}
-
-// ============================================================
-// Declarator analysis result
-// ============================================================
-
-interface DeclaratorInfo {
-  name: string;
-  kind: "function" | "variable" | "deductionGuide";
-  returnType: string;
-  parameters: string[];
-  hasTemplateArgsOnName: boolean;
-}
-
-function defer(fn: () => void): Disposable {
-  return {
-    [Symbol.dispose]() {
-      return fn();
-    }
-  }
-}
-
-interface DeclarationContext {
-  specifier: DeclarationSpecifierSet;
-}
-
-const DECLARATION_SPECIFIERS = [
-  // storage-class-specifier
-  "static",
-  "thread_local",
-  "extern",
-  "mutable",
-  // defining-type-specifier
-  // -> simple-type-specifier
-  // -> typename-specifier
-  "typename",
-  // -> cv-qualifier
-  "const",
-  "volatile",
-  // -> class-specifier
-  
-] as const;
-
-// ============================================================
-// Parser
-// ============================================================
+const EMPTY_DECLARATION_GROUP: DeclarationGroup = [];
 
 export class Parser {
   private readonly lexer: Lexer;
   private readonly header: string;
   private readonly nsStack: string[];
-  
-  private readonly declCtxStack: DeclarationContext[];
 
   symbols: SymbolEntry[];
 
-
-
   /** current token */
-  private la: Token;
-  private savedPos: number;
-  /** 1-based */
-  private savedLine: number;
-  /** 1-based */
-  private savedCol: number;
+  private tok: Token;
+  private nextTok(): Token {
+    return this.lexer.peek();
+  }
 
   constructor(lexer: Lexer, header: string) {
     this.lexer = lexer;
     this.header = header;
     this.nsStack = [];
-    this.declCtxStack = [];
     this.symbols = [];
-    this.la = lexer.next();
-    this.savedPos = 0;
-    this.savedLine = 1;
-    this.savedCol = 1;
+    this.tok = lexer.next();
   }
 
   // ---- Token helpers ----
 
   private adv(): Token {
-    const t = this.la;
-    this.la = this.lexer.next();
+    const t = this.tok;
+    this.tok = this.lexer.next();
     return t;
-  }
-
-  private acceptVal(v: string): Token | null {
-    if (this.la.value === v) return this.adv();
-    return null;
   }
 
   /** is identifier or keyword */
   private isId(v: string): boolean {
-    return this.la.type === TokenType.Identifier && this.la.value === v;
+    return this.tok.type === TokenType.Identifier && this.tok.value === v;
   }
 
   /** is punctuation */
   private isP(v: string): boolean {
-    return this.la.type === TokenType.Punct && this.la.value === v;
-  }
-
-  private isTT(tt: TokenType): boolean {
-    return this.la.type === tt;
+    return this.tok.type === TokenType.Punct && this.tok.value === v;
   }
 
   private eof(): boolean {
-    return this.la.type === TokenType.EOF;
+    return this.tok.type === TokenType.EOF;
   }
 
   private resolved(tok: Token): string {
     return tok.type === TokenType.LatexEscape ? resolveLatex(tok) : tok.value;
   }
 
-  private save(): void {
-    this.savedPos = this.lexer["pos"];
-    this.savedLine = this.lexer["line"];
-    this.savedCol = this.lexer["col"];
-  }
-
-  private restore(): void {
-    this.lexer["pos"] = this.savedPos;
-    this.lexer["line"] = this.savedLine;
-    this.lexer["col"] = this.savedCol;
-    this.la = this.lexer.next();
-    // But we need to re-skip whitespace/comments from the saved position
-  }
-
   // ---- Balanced skip helpers ----
 
-  private skipBalanced(open: string, close: string): string {
+  private consumeBalancedTokens(open: string, close: string): Token[] {
+    const tokens: Token[] = [];
+    assert(this.isP(open));
     let depth = 0;
-    let raw = "";
-    let started = false;
     while (!this.eof()) {
-      const v = this.la.value;
-      if (v === open) {
+      const v = this.tok.value;
+      if (["(", "{", "["].includes(v)) {
         depth++;
-        started = true;
       }
-      if (v === close) depth--;
-      raw += v;
+      if ([")", "}", "]"].includes(v)) {
+        depth--;
+      }
+      tokens.push(this.tok);
       this.adv();
-      if (started && depth === 0) break;
+      if (depth === 0) {
+        break;
+      }
     }
-    return raw;
+    return tokens;
   }
 
   private skipBalancedNoCollect(open: string, close: string): void {
     let depth = 0;
     let started = false;
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (v === open) {
         depth++;
         started = true;
@@ -498,7 +108,7 @@ export class Parser {
   private skipToSemicolon(): void {
     let depth = 0;
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (v === "(" || v === "[" || v === "<") depth++;
       else if (v === ")" || v === "]" || v === ">") depth--;
       else if (depth === 0 && v === ";") break;
@@ -514,7 +124,7 @@ export class Parser {
     let depth = 0;
     let raw = "";
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (depth === 0 && (v === ";" || v === "{")) break;
       if (v === "(" || v === "<") depth++;
       else if (v === ")" || v === ">") depth--;
@@ -523,7 +133,7 @@ export class Parser {
       } else if (v === "]") {
         /* skip */
       }
-      raw += (raw ? " " : "") + this.resolved(this.la);
+      raw += (raw ? " " : "") + this.resolved(this.tok);
       this.adv();
     }
     return raw;
@@ -532,7 +142,7 @@ export class Parser {
   private skipInitializer(): void {
     let depth = 0;
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (v === "(" || v === "{" || v === "<") depth++;
       else if (v === ")" || v === "}" || v === ">") depth--;
       else if (depth === 0 && (v === ";" || v === ",")) break;
@@ -544,7 +154,7 @@ export class Parser {
     this.adv(); // consume :
     let depth = 0;
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (v === "(") depth++;
       else if (v === ")") depth--;
       else if (v === "<") depth++;
@@ -554,43 +164,6 @@ export class Parser {
     }
   }
 
-  // ---- Specifier parsing ----
-
-  private parseSpecifiers(): SpecifierSet {
-    const s = emptySpecs();
-    while (!this.eof()) {
-      if (
-        this.la.type === TokenType.Identifier &&
-        SPECIFIER_KW.has(this.la.value)
-      ) {
-        const kw = this.la.value;
-        this.adv();
-        if (kw === "inline") s.inline = true;
-        else if (kw === "constexpr") s.constexpr = true;
-        else if (kw === "constinit") s.constinit = true;
-        else if (kw === "static") s.static = true;
-        else if (kw === "virtual") s.virtual = true;
-        else if (kw === "friend") s.friend = true;
-        else if (kw === "volatile") s.volatile = true;
-        else if (kw === "mutable") s.mutable = true;
-        else if (kw === "thread_local") s.thread_local = true;
-        else if (kw === "explicit") {
-          s.explicit = true;
-          if (this.isP("(")) this.skipBalancedNoCollect("(", ")");
-        } else if (kw === "extern") {
-          s.extern = true;
-          if ((this.la.type as number) === TokenType.StringLiteral) {
-            this.langLinkage = this.la.value.replace(/"/g, "") as "C" | "C++";
-            this.adv();
-          }
-        }
-      } else break;
-    }
-    return s;
-  }
-
-  // ---- Template parameter list ----
-
   private parseTemplateParams(): TemplateInfo {
     this.adv(); // consume <
     let depth = 1;
@@ -599,7 +172,7 @@ export class Parser {
     let requiresText: string | null = null;
 
     while (!this.eof() && depth > 0) {
-      const v = this.la.value;
+      const v = this.tok.value;
 
       if (v === "<") {
         depth++;
@@ -620,9 +193,9 @@ export class Parser {
         this.adv();
       } else {
         const r =
-          this.la.type === TokenType.LatexEscape
-            ? resolveLatex(this.la)
-            : this.la.value;
+          this.tok.type === TokenType.LatexEscape
+            ? resolveLatex(this.tok)
+            : this.tok.value;
         if (r.length > 0) {
           const needsSp =
             cur.length > 0 &&
@@ -689,7 +262,7 @@ export class Parser {
     ]);
     let tokenCount = 0;
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
       if (v === "(") depth++;
       else if (v === ")") depth--;
       else if (v === "<") depth++;
@@ -698,7 +271,7 @@ export class Parser {
       // Stop at declaration-starting keywords at depth 0
       if (
         depth === 0 &&
-        this.la.type === TokenType.Identifier &&
+        this.tok.type === TokenType.Identifier &&
         DECL_KEYWORDS.has(v)
       ) {
         break;
@@ -709,7 +282,7 @@ export class Parser {
         break;
       }
 
-      raw += (raw ? " " : "") + this.resolved(this.la);
+      raw += (raw ? " " : "") + this.resolved(this.tok);
       this.adv();
       tokenCount++;
 
@@ -722,47 +295,145 @@ export class Parser {
         // If we just closed balanced parens/brackets and the next token
         // looks like it starts a declaration, stop
         const nextIsDecl =
-          this.la.type === TokenType.Identifier &&
-          DECL_KEYWORDS.has(this.la.value);
+          this.tok.type === TokenType.Identifier &&
+          DECL_KEYWORDS.has(this.tok.value);
         if (nextIsDecl) break;
       }
     }
     return raw.trim();
   }
 
+  private isAttribute(): boolean {
+    return (
+      this.isId("alignas") || (this.isP("[") && this.nextTok().value === "[")
+    );
+  }
+
+  private tryParseAttribute(): AttributeInfo[] {
+    const attributes: AttributeInfo[] = [];
+    while (this.isAttribute()) {
+      if (this.isId("alignas")) {
+        attributes.push({ startLoc: this.tok.loc });
+        this.adv(); // alignas
+        assert(this.isP("("));
+        // LOOSE PARSE: parseExpression
+        this.consumeBalancedTokens("(", ")");
+      } else {
+        attributes.push({ startLoc: this.tok.loc });
+        this.consumeBalancedTokens("[", "]");
+      }
+    }
+    return attributes;
+  }
+
+  private die(msg: string): never {
+    const line = this.lexer.lines[this.tok.loc.line - 1] || "";
+    throw new Error(
+      `${this.tok.loc.line}:${this.tok.loc.col}: ${line}\n    ${msg} at token \`${this.tok.value}\` ...`,
+    );
+  }
+  private unimplemented(name?: string): never {
+    this.die(`Unimplemented parser feature ${name || ""}`);
+  }
+
   // ---- Top-level ----
 
   parseTopLevel(): void {
     while (!this.eof()) {
-      this.parseDeclaration(emptySpecs(), null);
+      if (this.tok.type === TokenType.Identifier) {
+        switch (this.tok.value) {
+          case "module":
+          case "import": {
+            this.die(`module declarations not supported`);
+          }
+          case "export": {
+            if (this.lexer.peek().value === "import") {
+              this.die(`module declarations not supported`);
+            }
+          }
+        }
+      }
+      const leadingAttributes = this.tryParseAttribute();
+      this.parseExternalDeclaration({ leadingAttributes });
     }
   }
 
   // ---- Declaration ----
 
-
-
-  private parseDeclaration(
-    specs: SpecifierSet,
-    tInfo: TemplateInfo | null,
-  ): void {
-    if (this.eof()) return;
-
-    // template<...>
-    if (this.isId("template")) {
+  private parseExternalDeclaration({
+    leadingAttributes,
+  }: {
+    leadingAttributes: AttributeInfo[];
+  }): DeclarationGroup {
+    if (this.eof()) {
+      if (leadingAttributes.length > 0) {
+        this.die(`Attributes without declaration at end of file`);
+      }
+      return EMPTY_DECLARATION_GROUP;
+    }
+    if (this.isP(";")) {
       this.adv();
-      const ti = this.parseTemplateParams();
+      return [{ attributes: leadingAttributes }];
+    }
+    if (
+      this.tok.type === TokenType.Identifier &&
+      ["using", "namespace", "typedef", "template", "static_assert"].includes(
+        this.tok.value,
+      )
+    ) {
+      return this.parseDeclaration(leadingAttributes);
+    }
+    if (this.isId("inline")) {
+      const nextTok = this.nextTok();
+      if (
+        nextTok.type === TokenType.Identifier &&
+        nextTok.value === "namespace"
+      ) {
+        return this.parseDeclaration(leadingAttributes);
+      }
+    }
+    if (this.isId("extern")) {
+      const nextTok = this.nextTok();
+      if (nextTok.type === TokenType.StringLiteral) {
+        return this.parseLinkage(leadingAttributes);
+      }
+    }
+    if (this.isId("export")) {
+      return this.parseExportDeclaration(leadingAttributes);
+    }
+    return this.parseDeclarationOrFunctionDefinition(leadingAttributes);
+  }
+
+  /** parse a declaration which must NOT be a function definition */
+  private parseDeclaration(
+    leadingAttributes: AttributeInfo[],
+  ): DeclarationGroup {
+    // template <...>
+    if (this.isId("template")) {
+      this.adv(); // template
+      this.unimplemented("template declaration");
+      const templateParams = this.parseTemplateParams();
       const combined = this.combineTI(tInfo, ti);
       const inner = this.parseSpecifiers();
       this.parseDeclaration(inner, combined);
       return;
     }
 
-    // namespace
+    // [inline] namespace
     if (this.isId("namespace")) {
-      this.parseNamespace();
-      return;
+      return [this.parseNamespace({ inline: false })];
     }
+    if (this.isId("inline")) {
+      const nextTok = this.nextTok();
+      if (
+        nextTok.type === TokenType.Identifier &&
+        nextTok.value === "namespace"
+      ) {
+        return [this.parseNamespace({ inline: true })];
+      }
+    }
+
+    this.unimplemented("declarations other");
 
     // class/struct/union (but not inside template params)
     if (this.isId("class") || this.isId("struct") || this.isId("union")) {
@@ -802,8 +473,8 @@ export class Parser {
     }
 
     // extern "C"/"C++" linkage specification
-    if (specs.extern && this.la.type === TokenType.StringLiteral) {
-      const lang = this.la.value.replace(/"/g, "");
+    if (specs.extern && this.tok.type === TokenType.StringLiteral) {
+      const lang = this.tok.value.replace(/"/g, "");
       this.langLinkage = lang as "C" | "C++";
       this.adv();
       if (this.isP("{")) {
@@ -832,45 +503,69 @@ export class Parser {
     this.parseFunctionOrVariableOrOperator(specs, tInfo);
   }
 
+  private parseLinkage(leadingAttributes: AttributeInfo[]): DeclarationGroup {
+    this.unimplemented("linkage specification");
+  }
+
+  private parseExportDeclaration(
+    leadingAttributes: AttributeInfo[],
+  ): DeclarationGroup {
+    this.unimplemented("export declaration");
+  }
+
+  private parseDeclarationOrFunctionDefinition(
+    leadingAttributes: AttributeInfo[],
+  ): DeclarationGroup {
+    this.unimplemented("decl-or-func-def");
+  }
+
   // ---- Namespace ----
 
-  private parseNamespace(): void {
+  private parseNamespace({ inline }: { inline: boolean }): DeclarationInfo {
+    if (inline) {
+      assert(this.isId("inline"));
+      this.adv(); // "inline"
+    }
+    assert(this.isId("namespace"));
     this.adv(); // "namespace"
 
-    let isInline = false;
-    if (this.isId("inline")) {
-      isInline = true;
-      this.adv();
-    }
+    const attributes = this.tryParseAttribute();
 
-    const name = this.readQualifiedIdent();
-    if (!name) {
-      this.skipToSemicolon();
-      if (this.isP(";")) this.adv();
-      return;
+    let name = "";
+    while (this.tok.type === TokenType.Identifier) {
+      name = this.tok.value;
+      this.adv();
+      if (this.isP("::")) {
+        name += "::";
+        this.adv();
+        // namespace X::inline Y { ... }
+        if (this.isId("inline")) {
+          this.adv();
+        }
+      } else {
+        break;
+      }
     }
 
     // namespace X = Y;
     if (this.isP("=")) {
-      this.adv();
-      const target = this.readQualifiedIdent();
-      if (this.isP(";")) this.adv();
-      this.push(
-        this.makeSym(target, "namespaceAlias", null, undefined, undefined),
-      );
-      return;
+      this.die("namespace alias");
     }
 
-    // namespace X { ... }
-    if (this.isP("{")) {
-      this.adv();
-      this.nsStack.push(name);
-      return;
+    // namespace { ... }
+    if (!name) {
+      this.die("anonymous namespaces not supported");
     }
 
-    // namespace X; (forward declaration)
+    assert(this.isP("{"));
+    this.adv(); // consume {
+
     this.nsStack.push(name);
-    if (this.isP(";")) this.adv();
+
+    while (!this.isP("}")) {
+      const leadingAttributes = this.tryParseAttribute();
+      this.parseExternalDeclaration({ leadingAttributes });
+    }
   }
 
   // ---- Using ----
@@ -919,7 +614,7 @@ export class Parser {
 
     // using X::Y::Z;
     let target = first;
-    while (this.la.type === TokenType.ScopeRes) {
+    while (this.tok.type === TokenType.ScopeRes) {
       this.adv();
       const part = this.readIdentOrLatex();
       target += "::" + (part || "");
@@ -938,10 +633,8 @@ export class Parser {
 
   // ---- Class / struct / union ----
 
-  private parseClassOrStruct(
-    tInfo: TemplateInfo | null,
-  ): void {
-    const classKey = this.la.value;
+  private parseClassOrStruct(tInfo: TemplateInfo | null): void {
+    const classKey = this.tok.value;
     if (classKey !== "class" && classKey !== "struct" && classKey !== "union")
       return;
     this.adv();
@@ -1032,10 +725,10 @@ export class Parser {
     let lastIdent = "";
     while (!this.eof() && !this.isP(";")) {
       if (
-        this.la.type === TokenType.Identifier ||
-        this.la.type === TokenType.LatexEscape
+        this.tok.type === TokenType.Identifier ||
+        this.tok.type === TokenType.LatexEscape
       ) {
-        lastIdent = this.resolved(this.la);
+        lastIdent = this.resolved(this.tok);
       }
       this.adv();
     }
@@ -1079,9 +772,7 @@ export class Parser {
 
   // ---- Big disambiguator ----
 
-  private parseFunctionOrVariableOrOperator(
-    tInfo: TemplateInfo | null,
-  ): void {
+  private parseFunctionOrVariableOrOperator(tInfo: TemplateInfo | null): void {
     // Check if current token stream starts with or contains "operator"
     // before we reach ( or ;
     if (this.detectOperator()) {
@@ -1124,9 +815,7 @@ export class Parser {
     return false;
   }
 
-  private scanDeclarator(
-    tInfo: TemplateInfo | null,
-  ): DeclaratorInfo | null {
+  private scanDeclarator(tInfo: TemplateInfo | null): DeclaratorInfo | null {
     // Walk tokens collecting type/name, looking for '(' to indicate function,
     // '=' for variable, or '->' for deduction guide / trailing return type.
     const tokens: { resolved: string; raw: string }[] = [];
@@ -1143,7 +832,7 @@ export class Parser {
     let trailingRT = "";
 
     while (!this.eof()) {
-      const v = this.la.value;
+      const v = this.tok.value;
 
       if (state === "type") {
         if (v === "(") {
@@ -1160,10 +849,10 @@ export class Parser {
           // Multiple declarators on one line - just take first
           break;
         } else if (
-          this.la.type === TokenType.Identifier ||
-          this.la.type === TokenType.LatexEscape
+          this.tok.type === TokenType.Identifier ||
+          this.tok.type === TokenType.LatexEscape
         ) {
-          const r = this.resolved(this.la);
+          const r = this.resolved(this.tok);
           tokens.push({ resolved: r, raw: v });
           nameIdent = r;
           lastIdentIdx = tokens.length - 1;
@@ -1179,14 +868,14 @@ export class Parser {
             this.skipBalancedNoCollect("<", ">");
           }
           continue;
-        } else if (this.la.type === TokenType.ScopeRes) {
+        } else if (this.tok.type === TokenType.ScopeRes) {
           tokens.push({ resolved: "::", raw: "::" });
           this.adv();
           nameIdent = "";
           lastIdentIdx = -1;
           hasNameAngleBracket = false;
           continue;
-        } else if ((this.la.type as number) === TokenType.ScopeRes) {
+        } else if ((this.tok.type as number) === TokenType.ScopeRes) {
           tokens.push({ resolved: "::", raw: "::" });
           this.adv();
           nameIdent = "";
@@ -1225,18 +914,18 @@ export class Parser {
           }
           continue;
         } else {
-          paramText += this.resolved(this.la) + " ";
+          paramText += this.resolved(this.tok) + " ";
           this.adv();
           continue;
         }
       }
 
       if (state === "afterParams") {
-        if (this.la.type === TokenType.Arrow) {
+        if (this.tok.type === TokenType.Arrow) {
           isDeductionGuide = true;
           this.adv();
           while (!this.eof() && !this.isP(";") && !this.isP("{")) {
-            trailingRT += this.resolved(this.la) + " ";
+            trailingRT += this.resolved(this.tok) + " ";
             this.adv();
           }
           break;
@@ -1419,9 +1108,9 @@ export class Parser {
     let returnType = "";
     while (
       !this.eof() &&
-      !(this.la.type === TokenType.Identifier && this.la.value === "operator")
+      !(this.tok.type === TokenType.Identifier && this.tok.value === "operator")
     ) {
-      returnType += (returnType ? " " : "") + this.resolved(this.la);
+      returnType += (returnType ? " " : "") + this.resolved(this.tok);
       this.adv();
     }
     returnType = returnType.trim();
@@ -1450,7 +1139,7 @@ export class Parser {
         opName = "[]";
         this.adv();
       }
-    } else if (this.la.type === TokenType.Arrow) {
+    } else if (this.tok.type === TokenType.Arrow) {
       opName = "->";
       this.adv();
       if (this.isP("*")) {
@@ -1458,28 +1147,28 @@ export class Parser {
         this.adv();
       }
     } else if (
-      (this.la.type as number) === TokenType.StringLiteral &&
-      this.la.value.startsWith('"')
+      (this.tok.type as number) === TokenType.StringLiteral &&
+      this.tok.value.startsWith('"')
     ) {
       // operator""suffix
-      let sv = this.la.value;
+      let sv = this.tok.value;
       // Extract suffix from string literal like ""sv or "sv"
       sv = sv.replace(/^"/, "").replace(/"$/, "");
       opName = 'operator""' + sv;
       this.adv();
-    } else if (this.la.type === TokenType.Identifier) {
+    } else if (this.tok.type === TokenType.Identifier) {
       // Conversion operator: operator int, operator bool, operator basic_string, etc.
-      opName = this.resolved(this.la);
+      opName = this.resolved(this.tok);
       this.adv();
       // Could be qualified: operator std::size_t
-      while ((this.la.type as number) === TokenType.ScopeRes) {
+      while ((this.tok.type as number) === TokenType.ScopeRes) {
         opName += "::";
         this.adv();
         if (
-          this.la.type === TokenType.Identifier ||
-          this.la.type === TokenType.LatexEscape
+          this.tok.type === TokenType.Identifier ||
+          this.tok.type === TokenType.LatexEscape
         ) {
-          opName += this.resolved(this.la);
+          opName += this.resolved(this.tok);
           this.adv();
         }
       }
@@ -1489,12 +1178,12 @@ export class Parser {
         this.skipBalancedNoCollect("<", ">");
       }
     } else if (
-      this.la.type === TokenType.Punct &&
-      "+-*/%^&|~!=<>".includes(this.la.value)
+      this.tok.type === TokenType.Punct &&
+      "+-*/%^&|~!=<>".includes(this.tok.value)
     ) {
       // Symbolic operator: + - * / % ^ & | ~ ! = < >
       // Could be compound: ++ -- += -= *= /= %= ^= &= |= <<= >>=
-      opName = this.la.value;
+      opName = this.tok.value;
       this.adv();
       // Accumulate more punct chars that form compound operators
       const compoundOps = [
@@ -1523,20 +1212,20 @@ export class Parser {
       // Try to extend
       while (
         !this.eof() &&
-        this.la.type === TokenType.Punct &&
-        "+-*/%^&|~!=<>".includes(this.la.value)
+        this.tok.type === TokenType.Punct &&
+        "+-*/%^&|~!=<>".includes(this.tok.value)
       ) {
-        const candidate = opName + this.la.value;
+        const candidate = opName + this.tok.value;
         if (
           compoundOps.some((co) => co.startsWith(candidate) || candidate === co)
         ) {
-          opName += this.la.value;
+          opName += this.tok.value;
           this.adv();
         } else {
           break;
         }
       }
-    } else if (this.la.type === TokenType.Ellipsis) {
+    } else if (this.tok.type === TokenType.Ellipsis) {
       // Not a real C++ operator, but handle gracefully
       opName = "...";
       this.adv();
@@ -1544,8 +1233,8 @@ export class Parser {
       opName = "~";
       this.adv();
       // Usually followed by class name: ~ClassName()
-      if ((this.la.type as number) === TokenType.Identifier) {
-        opName += this.resolved(this.la);
+      if ((this.tok.type as number) === TokenType.Identifier) {
+        opName += this.resolved(this.tok);
         this.adv();
       }
     }
@@ -1640,7 +1329,7 @@ export class Parser {
         continue;
       }
       // Check for && (rvalue ref qualifier)
-      if (this.la.value === "&&") {
+      if (this.tok.value === "&&") {
         this.adv();
         continue;
       }
@@ -1651,30 +1340,29 @@ export class Parser {
   // ---- Helpers ----
 
   private readIdentOrLatex(): string {
-    if (this.la.type === TokenType.Identifier) {
-      const v = this.la.value;
+    if (this.tok.type === TokenType.Identifier) {
+      const v = this.tok.value;
       this.adv();
       return v;
     }
-    if (this.la.type === TokenType.LatexEscape) {
-      const v = resolveLatex(this.la);
+    if (this.tok.type === TokenType.LatexEscape) {
+      const v = resolveLatex(this.tok);
       this.adv();
-      if (v.includes("::")) return v.split("::").pop()!;
       return v;
     }
-    return "";
+    this.die("Expected identifier");
   }
 
   private readQualifiedIdent(): string {
     let name = "";
     while (!this.eof()) {
       if (
-        this.la.type === TokenType.Identifier ||
-        this.la.type === TokenType.LatexEscape
+        this.tok.type === TokenType.Identifier ||
+        this.tok.type === TokenType.LatexEscape
       ) {
-        name += this.resolved(this.la);
+        name += this.resolved(this.tok);
         this.adv();
-      } else if (this.la.type === TokenType.ScopeRes) {
+      } else if (this.tok.type === TokenType.ScopeRes) {
         name += "::";
         this.adv();
       } else if (this.isP("<")) {
@@ -1733,112 +1421,4 @@ export class Parser {
     }
     return entry as SymbolEntry;
   }
-}
-
-// ============================================================
-// Trailing return type tracking (needed for deduction guides)
-// ============================================================
-
-// The emitDeclarator function needs the trailingRT variable from scanDeclarator,
-// but it's not directly accessible. We'll pass it through the info object instead.
-
-// Override DeclaratorInfo to include trailingReturn
-interface DeclaratorInfoFull extends DeclaratorInfo {
-  trailingReturnType?: string;
-}
-
-// ============================================================
-// Preprocessing
-// ============================================================
-
-interface PreprocessResult {
-  preprocessedCode: string;
-  macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
-}
-
-function preprocessCode(code: string, header: string): PreprocessResult {
-  const symbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[] = [];
-  const lines = code.split("\n");
-
-  // join lines with backslashes
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.endsWith("\\")) {
-      // Join with next line
-      if (i + 1 < lines.length) {
-        lines[i] = line.slice(0, -1) + lines[i + 1];
-        lines.splice(i + 1, 1);
-        i--; // reprocess this line in case of multiple continuations
-      }
-    }
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
-    const resolved = resolveLaTeXInText(line);
-    const directive = /^#\s*(\w+)(.*)$/.exec(resolved);
-    if (directive) {
-      // preprocessor directive
-      const [, directiveName, rest] = directive;
-      if (directiveName === "define") {
-        // Extract macro name and parameters
-        const match = rest.match(/^\s*(\w+)(?:\(([^)]*)\))?/);
-        if (!match) {
-          console.warn(`#define regex matching failed: ${rest}`);
-          continue;
-        }
-        const namespace = ""; // macros should not have namespace
-        const [, name, parameterStr] = match;
-        if (parameterStr) {
-          const parameters = parameterStr
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-          symbols.push({
-            header,
-            namespace,
-            name,
-            kind: "functionLikeMacro",
-            raw: resolved,
-            parameters,
-          });
-        } else {
-          symbols.push({
-            header,
-            namespace,
-            name,
-            kind: "macro",
-            raw: resolved,
-          });
-        }
-      }
-      // preprocessed
-      lines[i] = "";
-    }
-  }
-  return {
-    preprocessedCode: lines.join("\n"),
-    macroSymbols: symbols,
-  };
-}
-
-// ============================================================
-// Public API
-// ============================================================
-
-export function parseCodeblock(code: string, header: string): SymbolEntry[] {
-  // (because @...@ LaTeX escapes interfere with token-level #define parsing)
-  const { preprocessedCode, macroSymbols } = preprocessCode(code, header);
-
-  // DEBUG only check <bit> now
-  if (header !== "bit") {
-    return macroSymbols;
-  }
-
-  const lexer = new Lexer(preprocessedCode);
-  const parser = new Parser(lexer, header);
-  parser.parseTopLevel();
-
-  // Merge macro symbols at the beginning
-  return [...macroSymbols, ...parser.symbols];
 }

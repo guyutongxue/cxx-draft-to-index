@@ -1,0 +1,64 @@
+import { Token, TokenType } from "./lexer";
+
+const LATEX_SIMPLE: Record<string, string> = {
+  "\\seebelow": "/*see_below*/",
+  "\\seebelownc": "/*see_below*/",
+  "\\seeabove": "/*see_above*/",
+  "\\unspec": "/*unspecified*/",
+  "\\unspecnc": "/*unspecified*/",
+  "\\unspecbool": "/*unspecified-bool-type*/",
+  "\\unspecalloctype": "/*unspecified-allocator-type*/",
+  "\\unspecuniqtype": "/*unspecified-unique-type*/",
+  "\\expos": "/*exposition-only*/",
+  "\\ellip": "...",
+  "\\brk": " ",
+  "\\nocorr": "",
+};
+
+const LATEX_BRACED: [RegExp, string][] = [
+  // as-is replacement with LaTeX labels
+  [/^\\libmacro\{([^}]+)\}$/g, "$1"],
+  [/^\\defnlibxname\{([^}]+)\}$/g, "$1"],
+  [/^\\libglobal\{([^}]+)\}$/g, "$1"],
+  [/^\\global\{([^}]+)\}$/g, "$1"],
+  [/^\\deflibconcept\{([^}]+)\}$/g, "$1"],
+  [/^\\libconcept\{([^}]+)\}$/g, "$1"],
+  [/^\\ref\{([^}]+)\}$/g, ""],
+  [/^\\iref\{([^}]+)\}$/g, ""],
+
+  // exposition-only symbols, prefix with __
+  [/^\\defexposconcept\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposconcept\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposconceptnc\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposid\{([^}]+)\}$/g, "__$1"],
+  [/^\\exposidnc\{([^}]+)\}$/g, "__$1"],
+  // placeholders, should be as-is
+  [/^\\placeholder\{([^}]+)\}$/g, "$1"],
+  [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
+
+  // [/^\\tcode\{([^}]*)\}$/g, "$1"],
+  // [/^\\keyword\{([^}]+)\}$/g, "$1"],
+  // [/^\\term\{([^}]+)\}$/g, "$1"],
+
+  // alignment
+  [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
+];
+
+export function resolveSingleLaTeX(text: string): string {
+  if (typeof LATEX_SIMPLE[text] === "string") {
+    return LATEX_SIMPLE[text];
+  }
+  for (const [regex, replacement] of LATEX_BRACED) {
+    text = text.replace(regex, replacement);
+  }
+  // \textit command: replace with comment and drop its all inner LaTeX commands
+  if (text.startsWith("\\textit{") && text.endsWith("}")) {
+    text = `/* ${text.replace(/\\\w+\{|\}/g, "")} */`;
+  }
+  return text;
+}
+
+export function resolveLatex(tok: Token): string {
+  if (tok.type !== TokenType.LatexEscape) return tok.value;
+  return resolveSingleLaTeX(tok.value);
+}

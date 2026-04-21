@@ -1,6 +1,6 @@
 import type { IndexOutput, HeaderIndex, SymbolEntry } from "./types";
 import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
-import { parseCodeblock } from "./cpp-parser";
+import { parseCodeblock } from "./cpp";
 
 const OUTPUT_FILE = "dist/std-index.json";
 
