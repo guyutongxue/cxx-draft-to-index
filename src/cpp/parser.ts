@@ -13,7 +13,17 @@ interface AttributeInfo {
 }
 
 interface DeclarationInfo {
+  startLoc: Location;
+  endLoc: Location;
   attributes: AttributeInfo[];
+}
+
+interface TemplateParameter {
+  raw: string;
+}
+
+interface TemplateInfo {
+  templateParameters: TemplateParameter[];
 }
 
 interface DeclarationGroup extends Array<DeclarationInfo> {}
@@ -69,7 +79,7 @@ export class Parser {
 
   // ---- Balanced skip helpers ----
 
-  private consumeBalancedTokens(open: string, close: string): Token[] {
+  private skipBalancedTokens(open: string, close: string): Token[] {
     const tokens: Token[] = [];
     assert(this.isP(open));
     let depth = 0;
@@ -164,61 +174,32 @@ export class Parser {
     }
   }
 
-  private parseTemplateParams(): TemplateInfo {
+  private parseTemplateParams(): TemplateParameter[] {
+    assert(this.isP("<"));
     this.adv(); // consume <
-    let depth = 1;
-    const params: string[] = [];
-    let cur = "";
-    let requiresText: string | null = null;
-
-    while (!this.eof() && depth > 0) {
-      const v = this.tok.value;
-
-      if (v === "<") {
-        depth++;
-        cur += "< ";
-        this.adv();
-      } else if (v === ">") {
-        depth--;
-        if (depth === 0) {
-          if (cur.trim()) params.push(cur.trim());
-          this.adv();
-          break;
-        }
-        cur += "> ";
-        this.adv();
-      } else if (depth === 1 && v === ",") {
-        if (cur.trim()) params.push(cur.trim());
-        cur = "";
-        this.adv();
-      } else {
-        const r =
-          this.tok.type === TokenType.LatexEscape
-            ? resolveLatex(this.tok)
-            : this.tok.value;
-        if (r.length > 0) {
-          const needsSp =
-            cur.length > 0 &&
-            /[a-zA-Z0-9_]/.test(cur[cur.length - 1]) &&
-            /[a-zA-Z0-9_]/.test(r);
-          cur += (needsSp ? " " : "") + r;
-        }
-        this.adv();
-      }
+    while (true) {
+      // LOOSE PARSE: we have many forms of parameter:
+      // Type Parameter:
+      //   class = DEFAULT_ARG
+      //   class, NEXT_PARAM
+      //   class> OR class>>
+      //   class...
+      //   class ID = DEFAULT_ARG
+      //   class ID, NEXT_PARAM
+      //   class ID> OR class ID>>
+      //   CONSTRAINT ???[NOT auto]
+      //   typename = DEFAULT_ARG
+      //   typename, NEXT_PARAM
+      //   typename> OR typename>>
+      //   typename...
+      //   typename ID = DEFAULT_ARG
+      //   typename ID, NEXT_PARAM
+      //   typename ID> OR typename ID>>
+      // Template Parameter:
+      //   template ???
+      // Non-type Parameter:
+      //   PARAMETER_DECLARATION
     }
-
-    const isFull = params.length === 0;
-
-    if (this.isId("requires")) {
-      this.adv();
-      requiresText = this.skipRequiresExpression();
-    }
-
-    return {
-      templateParams: params,
-      templateRequires: requiresText,
-      isFullSpecialization: isFull,
-    };
   }
 
   private skipRequiresExpression(): string {
@@ -317,10 +298,10 @@ export class Parser {
         this.adv(); // alignas
         assert(this.isP("("));
         // LOOSE PARSE: parseExpression
-        this.consumeBalancedTokens("(", ")");
+        this.skipBalancedTokens("(", ")");
       } else {
         attributes.push({ startLoc: this.tok.loc });
-        this.consumeBalancedTokens("[", "]");
+        this.skipBalancedTokens("[", "]");
       }
     }
     return attributes;
@@ -365,6 +346,7 @@ export class Parser {
   }: {
     leadingAttributes: AttributeInfo[];
   }): DeclarationGroup {
+    const startLoc = leadingAttributes[0]?.startLoc || this.tok.loc;
     if (this.eof()) {
       if (leadingAttributes.length > 0) {
         this.die(`Attributes without declaration at end of file`);
@@ -373,7 +355,8 @@ export class Parser {
     }
     if (this.isP(";")) {
       this.adv();
-      return [{ attributes: leadingAttributes }];
+      const endLoc = this.tok.loc;
+      return [{ attributes: leadingAttributes, startLoc, endLoc }];
     }
     if (
       this.tok.type === TokenType.Identifier &&
@@ -406,17 +389,18 @@ export class Parser {
 
   /** parse a declaration which must NOT be a function definition */
   private parseDeclaration(
-    leadingAttributes: AttributeInfo[],
+    { startLoc }: { startLoc: Location },
   ): DeclarationGroup {
-    // template <...>
+    // template
     if (this.isId("template")) {
-      this.adv(); // template
-      this.unimplemented("template declaration");
-      const templateParams = this.parseTemplateParams();
-      const combined = this.combineTI(tInfo, ti);
-      const inner = this.parseSpecifiers();
-      this.parseDeclaration(inner, combined);
-      return;
+      const nextTok = this.nextTok();
+      if (!(nextTok.type === TokenType.Punct && nextTok.value === "<")) {
+        // explicit instantiation e.g.
+        // template void f<int>();
+        this.unimplemented("explicit instantiation");
+      }
+      return this.parseTemplateDeclarationOrSpecialization({ 
+    this.adv(); });
     }
 
     // [inline] namespace
@@ -629,6 +613,24 @@ export class Parser {
         target,
       }),
     );
+  }
+
+  // ---- Template ----
+
+  private parseTemplateDeclarationOrSpecialization({
+    startLoc,
+  }: {
+    startLoc: Location;
+  }): DeclarationGroup {
+    assert(this.isId("template"));
+    //   template<typename T>
+    //     template<typename U>
+    //       class A<T>::B { ... };
+    while (this.isId("template")) {
+      this.adv(); // template
+      const parameters = this.parseTemplateParams();
+
+    } 
   }
 
   // ---- Class / struct / union ----
