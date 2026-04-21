@@ -1,4 +1,3 @@
-
 // ============================================================
 // Token types
 // ============================================================
@@ -114,15 +113,11 @@ export class Lexer {
 
   next(): Token {
     this.skipWhitespaceAndComments();
+    const loc = this.loc;
 
     if (this.pos >= this.srcLen) {
       return { type: TokenType.EOF, value: "", loc: this.loc };
     }
-
-    /** start line */
-    const sl = this.line;
-    /** start col */
-    const sc = this.col;
     const c = this.ch;
 
     // @...@ LaTeX escape
@@ -135,7 +130,7 @@ export class Lexer {
       if (this.pos < this.srcLen) {
         value += this.advance();
       }
-      return { type: TokenType.LatexEscape, value, loc: this.loc };
+      return { type: TokenType.LatexEscape, value, loc };
     }
 
     // String literal
@@ -146,7 +141,7 @@ export class Lexer {
         value += x;
         if (x === '"' && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.StringLiteral, value, loc: this.loc };
+      return { type: TokenType.StringLiteral, value, loc };
     }
 
     // Char literal
@@ -157,7 +152,7 @@ export class Lexer {
         value += x;
         if (x === "'" && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.CharLiteral, value, loc: this.loc };
+      return { type: TokenType.CharLiteral, value, loc };
     }
 
     // Number
@@ -165,7 +160,7 @@ export class Lexer {
       let value = "";
       while (this.pos < this.srcLen && /[0-9a-fA-FxX.'_]/.test(this.ch))
         value += this.advance();
-      return { type: TokenType.Number, value, loc: this.loc };
+      return { type: TokenType.Number, value, loc };
     }
 
     // Identifier / keyword
@@ -182,7 +177,7 @@ export class Lexer {
       while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
         value += this.advance();
       }
-      return { type: TokenType.Identifier, value, loc: this.loc };
+      return { type: TokenType.Identifier, value, loc };
     }
 
     // ...
@@ -190,29 +185,32 @@ export class Lexer {
       this.advance();
       this.advance();
       this.advance();
-      return { type: TokenType.Ellipsis, value: "...", loc: this.loc };
+      return { type: TokenType.Ellipsis, value: "...", loc };
     }
 
     // ->
     if (this.getN(2) === "->") {
       this.advance();
       this.advance();
-      return { type: TokenType.Arrow, value: "->", loc: this.loc };
+      return { type: TokenType.Arrow, value: "->", loc };
     }
 
     // ::
     if (this.getN(2) === "::") {
       this.advance();
       this.advance();
-      return { type: TokenType.ScopeRes, value: "::", loc: this.loc };
+      return { type: TokenType.ScopeRes, value: "::", loc };
     }
 
     // TODO do we have any multiple char punctuators not handled yet?
+    // anyway do NOT handle >> as one token
+    // we currently always skip expressions so there is no use of `>>`
+    // but adjacent `>` is commonly used
 
     // Single-char punctuation
     if (PUNCT_CHARS.has(c)) {
       this.advance();
-      return { type: TokenType.Punct, value: c, loc: this.loc };
+      return { type: TokenType.Punct, value: c, loc };
     }
 
     throw new Error(`Unknown token: \`${this.getN(10)}\` ...`);
@@ -227,5 +225,9 @@ export class Lexer {
     this.line = sl;
     this.col = sc2;
     return tok;
+  }
+
+  range(startLoc: Location, endLoc: Location): string {
+    return this.src.slice(startLoc.offset, endLoc.offset);
   }
 }

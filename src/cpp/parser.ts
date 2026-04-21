@@ -100,6 +100,48 @@ export class Parser {
     return tokens;
   }
 
+  private skipBalancedTokensUntilPunct(
+    untilPuncts: string[],
+    considerUnparenedAngle = false,
+  ): Token[] {
+    const tokens: Token[] = [];
+    let depth = 0;
+    let parenDepth = 0;
+    while (!this.eof()) {
+      const v = this.tok.value;
+      const open =
+        parenDepth === 0 && considerUnparenedAngle
+          ? ["(", "{", "[", "<"]
+          : ["(", "{", "["];
+      if (open.includes(v)) {
+        depth++;
+        if (v === "(") {
+          parenDepth++;
+        }
+      }
+      tokens.push(this.tok);
+      this.adv();
+      const close =
+        parenDepth === 0 && considerUnparenedAngle
+          ? [")", "}", "]", ">"]
+          : [")", "}", "]"];
+      if (close.includes(v)) {
+        depth--;
+        if (v === ")") {
+          parenDepth--;
+        }
+      }
+      if (
+        depth === 0 &&
+        this.tok.type === TokenType.Punct &&
+        untilPuncts.includes(this.tok.value)
+      ) {
+        break;
+      }
+    }
+    return tokens;
+  }
+
   private skipBalancedNoCollect(open: string, close: string): void {
     let depth = 0;
     let started = false;
@@ -177,29 +219,28 @@ export class Parser {
   private parseTemplateParams(): TemplateParameter[] {
     assert(this.isP("<"));
     this.adv(); // consume <
+    const parameters: TemplateParameter[] = [];
+    // LOOSE PARSE: here might be a:
+    // - type template parameter:
+    //   `class|typename|<constraint> [...|<id> [= <typeid>]]`
+    //   which: <constraints> cannot be disambiguate from NTTP without sema
+    // - template template parameter:
+    //   `template <parameters> [concept|class|typename|auto] [...|<id> [= <typeid>]]`
+    // - NTTP: a parameter declaration
+    // damn its too complex and we should skip!
     while (true) {
-      // LOOSE PARSE: we have many forms of parameter:
-      // Type Parameter:
-      //   class = DEFAULT_ARG
-      //   class, NEXT_PARAM
-      //   class> OR class>>
-      //   class...
-      //   class ID = DEFAULT_ARG
-      //   class ID, NEXT_PARAM
-      //   class ID> OR class ID>>
-      //   CONSTRAINT ???[NOT auto]
-      //   typename = DEFAULT_ARG
-      //   typename, NEXT_PARAM
-      //   typename> OR typename>>
-      //   typename...
-      //   typename ID = DEFAULT_ARG
-      //   typename ID, NEXT_PARAM
-      //   typename ID> OR typename ID>>
-      // Template Parameter:
-      //   template ???
-      // Non-type Parameter:
-      //   PARAMETER_DECLARATION
+      const startLoc = this.tok.loc;
+      this.skipBalancedTokensUntilPunct([",", ">"])
+      const endLoc = this.tok.loc;
+      parameters.push({ raw: this.lexer.range(startLoc, endLoc) });
+      if (this.isP(">")) {
+        this.adv();
+        break;
+      }
+      assert(this.isP(","))
+      this.adv();
     }
+    return parameters;
   }
 
   private skipRequiresExpression(): string {
@@ -364,7 +405,7 @@ export class Parser {
         this.tok.value,
       )
     ) {
-      return this.parseDeclaration(leadingAttributes);
+      return this.parseDeclaration({ startLoc });
     }
     if (this.isId("inline")) {
       const nextTok = this.nextTok();
@@ -372,7 +413,7 @@ export class Parser {
         nextTok.type === TokenType.Identifier &&
         nextTok.value === "namespace"
       ) {
-        return this.parseDeclaration(leadingAttributes);
+        return this.parseDeclaration({ startLoc });
       }
     }
     if (this.isId("extern")) {
@@ -388,9 +429,11 @@ export class Parser {
   }
 
   /** parse a declaration which must NOT be a function definition */
-  private parseDeclaration(
-    { startLoc }: { startLoc: Location },
-  ): DeclarationGroup {
+  private parseDeclaration({
+    startLoc,
+  }: {
+    startLoc: Location;
+  }): DeclarationGroup {
     // template
     if (this.isId("template")) {
       const nextTok = this.nextTok();
@@ -399,8 +442,7 @@ export class Parser {
         // template void f<int>();
         this.unimplemented("explicit instantiation");
       }
-      return this.parseTemplateDeclarationOrSpecialization({ 
-    this.adv(); });
+      return this.parseTemplateDeclarationOrSpecialization({ startLoc });
     }
 
     // [inline] namespace
@@ -622,15 +664,19 @@ export class Parser {
   }: {
     startLoc: Location;
   }): DeclarationGroup {
+    const templateParameters = [];
     assert(this.isId("template"));
+    // there might be multiple template header...
+    // we just keep the code structure but do not touch it now
     //   template<typename T>
     //     template<typename U>
     //       class A<T>::B { ... };
     while (this.isId("template")) {
       this.adv(); // template
-      const parameters = this.parseTemplateParams();
-
-    } 
+      const params = this.parseTemplateParams();
+      templateParameters.push(...params);
+    }
+    this.unimplemented();
   }
 
   // ---- Class / struct / union ----
