@@ -23,7 +23,19 @@ interface TemplateParameter {
 }
 
 interface TemplateInfo {
+  // Full specialization, not partial
+  specialization: boolean;
   templateParameters: TemplateParameter[];
+}
+
+enum DeclSpecContextType {
+  Normal,
+  Class,
+  TypeSpecifier,
+  Trailing,
+  AliasDecl,
+  ConvOp,
+  TopLevel,
 }
 
 interface DeclarationGroup extends Array<DeclarationInfo> {}
@@ -230,14 +242,14 @@ export class Parser {
     // damn its too complex and we should skip!
     while (true) {
       const startLoc = this.tok.loc;
-      this.skipBalancedTokensUntilPunct([",", ">"], true)
+      this.skipBalancedTokensUntilPunct([",", ">"], true);
       const endLoc = this.tok.loc;
       parameters.push({ raw: this.lexer.range(startLoc, endLoc) });
       if (this.isP(">")) {
         this.adv();
         break;
       }
-      assert(this.isP(","))
+      assert(this.isP(","));
       this.adv();
     }
     return parameters;
@@ -389,9 +401,6 @@ export class Parser {
   }): DeclarationGroup {
     const startLoc = leadingAttributes[0]?.startLoc || this.tok.loc;
     if (this.eof()) {
-      if (leadingAttributes.length > 0) {
-        this.die(`Attributes without declaration at end of file`);
-      }
       return EMPTY_DECLARATION_GROUP;
     }
     if (this.isP(";")) {
@@ -545,6 +554,10 @@ export class Parser {
     this.unimplemented("decl-or-func-def");
   }
 
+  private parseDeclarationSpecifiers({}: { templateInfo: TemplateInfo }) {
+    this.unimplemented("declaration-specifier");
+  }
+
   // ---- Namespace ----
 
   private parseNamespace({ inline }: { inline: boolean }): DeclarationInfo {
@@ -596,7 +609,7 @@ export class Parser {
 
   // ---- Using ----
 
-  private parseUsing(tInfo: TemplateInfo | null): void {
+  private parseUsingDirectiveOrDeclaration(): void {
     this.adv(); // "using"
 
     // using namespace X;
@@ -671,12 +684,44 @@ export class Parser {
     //   template<typename T>
     //     template<typename U>
     //       class A<T>::B { ... };
+    let specialization = false;
     while (this.isId("template")) {
       this.adv(); // template
       const params = this.parseTemplateParams();
+      if (params.length === 0) {
+        specialization = true;
+      }
       templateParameters.push(...params);
     }
-    this.unimplemented();
+    const templateInfo: TemplateInfo = {
+      specialization,
+      templateParameters,
+    };
+    if (this.isId("concept")) {
+      this.unimplemented("concept");
+    }
+    return this.parseDeclarationAfterTemplate({
+      startLoc,
+      templateInfo,
+    });
+  }
+
+  private parseDeclarationAfterTemplate({
+    startLoc,
+    templateInfo,
+  }: {
+    startLoc: Location;
+    templateInfo: TemplateInfo;
+  }): DeclarationGroup {
+    // TODO if we are in member context, dispatch to a member declaration
+    const attributes = this.tryParseAttribute();
+
+    if (this.isId("using")) {
+      // template <...> using T = ...;
+      return this.parseUsingDirectiveOrDeclaration();
+    }
+
+    this.parseDeclarationSpecifiers({ templateInfo });
   }
 
   // ---- Class / struct / union ----
