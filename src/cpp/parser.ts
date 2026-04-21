@@ -230,7 +230,7 @@ export class Parser {
     // damn its too complex and we should skip!
     while (true) {
       const startLoc = this.tok.loc;
-      this.skipBalancedTokensUntilPunct([",", ">"])
+      this.skipBalancedTokensUntilPunct([",", ">"], true)
       const endLoc = this.tok.loc;
       parameters.push({ raw: this.lexer.range(startLoc, endLoc) });
       if (this.isP(">")) {
