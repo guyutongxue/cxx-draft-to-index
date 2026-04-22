@@ -8,30 +8,50 @@ export enum TokenType {
   StringLiteral,
   CharLiteral,
   Punct,
-  Ellipsis,
-  ScopeRes, // ::
-  Arrow, // ->
   LatexEscape, // @...@
   EOF,
 }
 
 export interface Location {
-  line: number;
-  col: number;
-  offset: number;
+  readonly line: number;
+  readonly col: number;
+  readonly offset: number;
 }
 
-export interface Token {
-  type: TokenType;
-  value: string;
-  loc: Location;
+export interface IToken {
+  readonly type: TokenType;
+  readonly value: string;
+  readonly loc: Location;
+}
+
+export class Token implements IToken {
+  readonly type!: TokenType;
+  readonly value!: string;
+  readonly loc!: Location;
+  constructor(token: IToken) {
+    Object.assign(this, token);
+  }
+  /** is identifier or keyword */
+  isId(v: string): boolean {
+    return this.type === TokenType.Identifier && this.value === v;
+  }
+
+  /** is punctuation */
+  isP(v: string): boolean {
+    return this.type === TokenType.Punct && this.value === v;
+  }
+
+  isEof(): boolean {
+    return this.type === TokenType.EOF;
+  }
+
 }
 
 // ============================================================
 // Lexer
 // ============================================================
 
-const PUNCT_CHARS = new Set("{}()[],;:=*%+!~^&.|/<>?#@".split(""));
+const PUNCT_CHARS = new Set("{}()[]<>,;:=*%+!~^&.|/?".split(""));
 
 export class Lexer {
   private readonly src: string;
@@ -116,7 +136,7 @@ export class Lexer {
     const loc = this.loc;
 
     if (this.pos >= this.srcLen) {
-      return { type: TokenType.EOF, value: "", loc: this.loc };
+      return new Token({ type: TokenType.EOF, value: "", loc: this.loc });
     }
     const c = this.ch;
 
@@ -130,7 +150,7 @@ export class Lexer {
       if (this.pos < this.srcLen) {
         value += this.advance();
       }
-      return { type: TokenType.LatexEscape, value, loc };
+      return new Token({ type: TokenType.LatexEscape, value, loc });
     }
 
     // String literal
@@ -141,7 +161,7 @@ export class Lexer {
         value += x;
         if (x === '"' && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.StringLiteral, value, loc };
+      return new Token({ type: TokenType.StringLiteral, value, loc });
     }
 
     // Char literal
@@ -152,7 +172,7 @@ export class Lexer {
         value += x;
         if (x === "'" && value[value.length - 2] !== "\\") break;
       }
-      return { type: TokenType.CharLiteral, value, loc };
+      return new Token({ type: TokenType.CharLiteral, value, loc });
     }
 
     // Number
@@ -160,7 +180,7 @@ export class Lexer {
       let value = "";
       while (this.pos < this.srcLen && /[0-9a-fA-FxX.'_]/.test(this.ch))
         value += this.advance();
-      return { type: TokenType.Number, value, loc };
+      return new Token({ type: TokenType.Number, value, loc });
     }
 
     // Identifier / keyword
@@ -177,29 +197,16 @@ export class Lexer {
       while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
         value += this.advance();
       }
-      return { type: TokenType.Identifier, value, loc };
+      return new Token({ type: TokenType.Identifier, value, loc });
     }
 
-    // ...
-    if (this.getN(3) === "...") {
-      this.advance();
-      this.advance();
-      this.advance();
-      return { type: TokenType.Ellipsis, value: "...", loc };
-    }
-
-    // ->
-    if (this.getN(2) === "->") {
-      this.advance();
-      this.advance();
-      return { type: TokenType.Arrow, value: "->", loc };
-    }
-
-    // ::
-    if (this.getN(2) === "::") {
-      this.advance();
-      this.advance();
-      return { type: TokenType.ScopeRes, value: "::", loc };
+    for (const value of ["...", "->", "::", "[:", ":]", "^^", "&&"]) {
+      if (this.getN(value.length) === value) {
+        for (let i = 0; i < value.length; i++) {
+          this.advance();
+        }
+        return new Token({ type: TokenType.Punct, value, loc });
+      }
     }
 
     // TODO do we have any multiple char punctuators not handled yet?
@@ -210,7 +217,7 @@ export class Lexer {
     // Single-char punctuation
     if (PUNCT_CHARS.has(c)) {
       this.advance();
-      return { type: TokenType.Punct, value: c, loc };
+      return new Token({ type: TokenType.Punct, value: c, loc });
     }
 
     throw new Error(`Unknown token: \`${this.getN(10)}\` ...`);

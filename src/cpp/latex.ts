@@ -15,7 +15,10 @@ const LATEX_SIMPLE: Record<string, string> = {
   "\\nocorr": "",
 };
 
-const LATEX_BRACED: [RegExp, string][] = [
+type Replacer = (match: string, ...groups: string[]) => string;
+const EXPOSITION_ONLY_REPLACER: Replacer = (match, name) => `__${name.replaceAll("-", "_")}`;
+
+const LATEX_BRACED: [RegExp, string | Replacer][] = [
   // as-is replacement with LaTeX labels
   [/^\\libmacro\{([^}]+)\}$/g, "$1"],
   [/^\\defnlibxname\{([^}]+)\}$/g, "$1"],
@@ -27,11 +30,11 @@ const LATEX_BRACED: [RegExp, string][] = [
   [/^\\iref\{([^}]+)\}$/g, ""],
 
   // exposition-only symbols, prefix with __
-  [/^\\defexposconcept\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposconcept\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposconceptnc\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposid\{([^}]+)\}$/g, "__$1"],
-  [/^\\exposidnc\{([^}]+)\}$/g, "__$1"],
+  [/^\\defexposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\exposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\exposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\exposid\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\exposidnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   // placeholders, should be as-is
   [/^\\placeholder\{([^}]+)\}$/g, "$1"],
   [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
@@ -49,7 +52,7 @@ export function resolveSingleLaTeX(text: string): string {
     return LATEX_SIMPLE[text];
   }
   for (const [regex, replacement] of LATEX_BRACED) {
-    text = text.replace(regex, replacement);
+    text = text.replace(regex, replacement as string);
   }
   // \textit command: replace with comment and drop its all inner LaTeX commands
   if (text.startsWith("\\textit{") && text.endsWith("}")) {
@@ -60,5 +63,5 @@ export function resolveSingleLaTeX(text: string): string {
 
 export function resolveLatex(tok: Token): string {
   if (tok.type !== TokenType.LatexEscape) return tok.value;
-  return resolveSingleLaTeX(tok.value);
+  return resolveSingleLaTeX(tok.value.slice(1, -1));
 }
