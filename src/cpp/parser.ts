@@ -277,7 +277,7 @@ export class Parser {
   private die(msg: string): never {
     const line = this.lexer.lines[this.tok.loc.line - 1] || "";
     throw new Error(
-      `${this.tok.loc.line}:${this.tok.loc.col}: ${line}\n    ${msg} at token \`${this.tok.value}\` ...`,
+      `${this.header}:${this.tok.loc.line}:${this.tok.loc.col}: ${line}\n    ${msg} at token \`${this.tok.value}\` ...`,
     );
   }
   private unimplemented(name?: string): never {
@@ -340,7 +340,10 @@ export class Parser {
     if (this.isId("export")) {
       return this.parseExportDeclaration({ startLoc });
     }
-    return this.parseDeclarationOrFunctionDefinition({ startLoc });
+    return this.parseSimpleDeclarationOrFunctionDefinition({
+      startLoc,
+      templateInfo: null,
+    });
   }
 
   /** parse a declaration which must NOT be a function definition */
@@ -378,8 +381,45 @@ export class Parser {
     this.unimplemented("export declaration");
   }
 
-  private parseDeclarationOrFunctionDefinition({}: { startLoc: Location }) {
-    this.unimplemented("decl-or-func-def");
+  /**
+   * ```
+   * simple-declaration:
+   *     [decl-specifier-seq] [init-declarator-list] ;
+   * function-definition:
+   *     [decl-specifier-seq] declarator [some-stupid-grammar-here] function-body
+   * ```
+   */
+  private parseSimpleDeclarationOrFunctionDefinition({
+    startLoc,
+    templateInfo,
+  }: {
+    startLoc: Location;
+    templateInfo: TemplateInfo | null;
+  }): void {
+    const { classSpecifier } = this.parseDeclarationSpecifiers({
+      declStartLoc: startLoc,
+      templateInfo,
+      declSpecContextType: DeclSpecContextType.TopLevel,
+    });
+
+    while (!this.isP(";")) {
+      this.unimplemented("declarator");
+    }
+    this.adv(); // ;
+    if (classSpecifier) {
+      if (templateInfo) {
+        this.emitSymbol("classTemplate", {
+          name: classSpecifier.name,
+          raw: this.lexer.range(startLoc, this.tok.loc),
+          templateParams: templateInfo.templateParameters.map((p) => p.raw),
+        });
+      } else {
+        this.emitSymbol("class", {
+          name: classSpecifier.name,
+          raw: classSpecifier.raw + ";",
+        });
+      }
+    }
   }
 
   private parseDeclarationSpecifiers({
@@ -388,7 +428,7 @@ export class Parser {
     declSpecContextType,
   }: {
     declStartLoc: Location;
-    templateInfo: TemplateInfo;
+    templateInfo: TemplateInfo | null;
     declSpecContextType: DeclSpecContextType;
   }): DeclarationSpecifierInfo {
     // decl-specifier* attr-specifier*
@@ -558,6 +598,7 @@ export class Parser {
       this.tryParseAttribute();
       this.parseExternalDeclaration({ startLoc });
     }
+    this.adv(); // }
   }
 
   // ---- Using ----
@@ -684,28 +725,18 @@ export class Parser {
     templateInfo: TemplateInfo;
   }): void {
     // TODO if we are in member context, dispatch to a member declaration
-    const attributes = this.tryParseAttribute();
+
+    this.tryParseAttribute();
 
     if (this.isId("using")) {
       // template <...> using T = ...;
       return this.parseUsingDirectiveOrDeclaration({ startLoc, templateInfo });
     }
 
-    const { classSpecifier } = this.parseDeclarationSpecifiers({
-      declStartLoc: startLoc,
+    return this.parseSimpleDeclarationOrFunctionDefinition({
+      startLoc,
       templateInfo,
-      declSpecContextType: DeclSpecContextType.TopLevel,
     });
-
-    // TODO should we handle here?
-    if (classSpecifier) {
-      this.emitSymbol("classTemplate", {
-        name: classSpecifier.name,
-        raw: this.lexer.range(startLoc, this.tok.loc),
-        templateParams: templateInfo.templateParameters.map((p) => p.raw),
-      });
-    }
-    this.unimplemented("declaration after specifier");
   }
 
   // ---- Class / struct / union ----
@@ -774,7 +805,8 @@ export class Parser {
       useKind = "declaration";
     }
 
-    const raw = this.lexer.range(startLoc, this.tok.loc);
+    const endLoc = this.tok.loc;
+    const raw = this.lexer.range(startLoc, endLoc);
     return { tagKind, name, useKind, raw };
   }
 
