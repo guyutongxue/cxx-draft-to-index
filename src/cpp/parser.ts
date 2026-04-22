@@ -587,12 +587,12 @@ export class Parser {
 
     // namespace X = Y;
     if (this.isP("=")) {
-      this.die("namespace alias");
+      this.unimplemented("namespace alias");
     }
 
     // namespace { ... }
     if (!name) {
-      this.die("anonymous namespaces not supported");
+      this.unimplemented("anonymous namespaces");
     }
 
     this.assertP("{");
