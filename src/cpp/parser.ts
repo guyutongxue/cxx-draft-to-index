@@ -1,7 +1,5 @@
 import type {
   ExtractKind,
-  FunctionLikeMacroSymbolEntry,
-  MacroSymbolEntry,
   SymbolEntry,
   SymbolEntryBase,
   SymbolKind,
@@ -137,6 +135,13 @@ export class Parser {
   /** is punctuation */
   private isP(v: string): boolean {
     return this.tok.isP(v);
+  }
+
+  private isIdentifierOrLaTeX(): boolean {
+    return (
+      this.tok.type === TokenType.Identifier ||
+      this.tok.type === TokenType.LatexEscape
+    );
   }
 
   private assertId(v: string): void {
@@ -301,35 +306,18 @@ export class Parser {
           }
         }
       }
-      const startLoc = this.tok.loc;
-      this.tryParseAttribute();
-      this.parseExternalDeclaration({ startLoc });
+      this.parseExternalDeclaration();
     }
   }
 
   // ---- Declaration ----
 
-  private parseExternalDeclaration({ startLoc }: { startLoc: Location }): void {
-    if (this.eof()) {
-      return;
-    }
+  private parseExternalDeclaration(): void {
+    const startLoc = this.tok.loc;
+    this.tryParseAttribute();
     if (this.isP(";")) {
       this.adv();
       return;
-    }
-    if (
-      this.tok.type === TokenType.Identifier &&
-      ["using", "namespace", "typedef", "template", "static_assert"].includes(
-        this.tok.value,
-      )
-    ) {
-      return this.parseDeclaration({ startLoc });
-    }
-    if (this.isId("inline")) {
-      const nextTok = this.nextTok();
-      if (nextTok.isId("namespace")) {
-        return this.parseDeclaration({ startLoc });
-      }
     }
     if (this.isId("extern")) {
       const nextTok = this.nextTok();
@@ -340,13 +328,9 @@ export class Parser {
     if (this.isId("export")) {
       return this.parseExportDeclaration({ startLoc });
     }
-    return this.parseSimpleDeclarationOrFunctionDefinition({
-      startLoc,
-      templateInfo: null,
-    });
+    return this.parseDeclaration({ startLoc });
   }
 
-  /** parse a declaration which must NOT be a function definition */
   private parseDeclaration({ startLoc }: { startLoc: Location }): void {
     // template
     if (this.isId("template")) {
@@ -369,8 +353,19 @@ export class Parser {
         return this.parseNamespace({ inline: true });
       }
     }
-
-    this.unimplemented("declarations other");
+    if (this.isId("using")) {
+      return this.parseUsingDirectiveOrDeclaration({
+        startLoc,
+        templateInfo: null,
+      });
+    }
+    if (this.isId("static_assert")) {
+      this.unimplemented("static_assert");
+    }
+    return this.parseSimpleDeclarationOrFunctionDefinition({
+      startLoc,
+      templateInfo: null,
+    });
   }
 
   private parseLinkage({}: { startLoc: Location }) {
@@ -407,7 +402,13 @@ export class Parser {
     }
     this.adv(); // ;
     if (classSpecifier) {
-      if (templateInfo) {
+      if (classSpecifier.tagKind === "union") {
+        assert(!templateInfo, "union cannot be template");
+        this.emitSymbol("union", {
+          name: classSpecifier.name,
+          raw: classSpecifier.raw + ";",
+        });
+      } else if (templateInfo) {
         this.emitSymbol("classTemplate", {
           name: classSpecifier.name,
           raw: this.lexer.range(startLoc, this.tok.loc),
@@ -453,15 +454,16 @@ export class Parser {
       extern: false,
       mutable: false,
     };
+    let shouldReadIdExpression = false;
+
     while (true) {
       if (this.isP("[") && this.nextTok().isP("[")) {
-        // end of decl-specifier-seq, parse attributes if any
-        attributes.push(...this.tryParseAttribute());
+        // attribute-specifier should marks end of decl-specifiers
         break;
-      } else if (this.isP("::")) {
+      } else if (this.isP("::") || this.tok.type === TokenType.LatexEscape) {
         assert(typeSpecifiers.length == 0);
-        const { name } = this.readIdExpression();
-        typeSpecifiers.push(name);
+        shouldReadIdExpression = true;
+        break;
       }
       if (this.tok.type !== TokenType.Identifier) {
         break;
@@ -493,6 +495,7 @@ export class Parser {
           this.adv(); // (
           const startLoc = this.tok.loc;
           this.skipBalancedTokensUntilPunct([")"], false);
+          this.adv(); // )
           const endLoc = this.tok.loc;
           declSpecifiers.explicit = { raw: this.lexer.range(startLoc, endLoc) };
         }
@@ -535,13 +538,17 @@ export class Parser {
       } else if (id === "typename") {
         this.unimplemented("typename disambiguation");
       } else if (typeSpecifiers.length === 0) {
-        // TODO check this later
-        const { name } = this.readIdExpression();
-        typeSpecifiers.push(name);
+        shouldReadIdExpression = true;
       } else {
         break;
       }
     }
+    if (shouldReadIdExpression) {
+      // TODO check this later
+      const { name } = this.readIdExpression();
+      typeSpecifiers.push(name);
+    }
+    this.tryParseAttribute();
     return {
       typeSpecifiers,
       cvQualifiers,
@@ -563,8 +570,8 @@ export class Parser {
     this.tryParseAttribute();
 
     let name = "";
-    while (this.tok.type === TokenType.Identifier) {
-      name = this.tok.value;
+    while (this.isIdentifierOrLaTeX()) {
+      name += this.resolved(this.tok);
       this.adv();
       if (this.isP("::")) {
         name += "::";
@@ -589,15 +596,14 @@ export class Parser {
     }
 
     this.assertP("{");
-    this.adv(); // consume {
+    this.adv(); // {
 
     this.nsStack.push(name);
 
     while (!this.isP("}")) {
-      const startLoc = this.tok.loc;
-      this.tryParseAttribute();
-      this.parseExternalDeclaration({ startLoc });
+      this.parseExternalDeclaration();
     }
+    this.nsStack.pop();
     this.adv(); // }
   }
 
@@ -642,10 +648,11 @@ export class Parser {
       this.unimplemented("using-enum-declaration");
     }
 
-    const { name, parts } = this.readIdExpression();
+    let idExpr = this.readIdExpression();
 
     // using X = Y;
     if (this.isP("=")) {
+      const { name, parts } = idExpr;
       assert(parts.length === 1);
       this.adv();
       this.skipBalancedTokensUntilPunct([",", ";"], true);
@@ -668,13 +675,20 @@ export class Parser {
     }
 
     // using X::Y, Z::W;
-    while (this.isP(",")) {
-      this.adv();
+    while (true) {
+      const { name, parts } = idExpr;
       this.emitSymbol("usingDeclaration", {
-        name,
+        name: parts.at(-1)!.name,
         raw: this.lexer.range(startLoc, this.tok.loc),
         target: name,
       });
+      if (this.isP(";")) {
+        this.adv();
+        break;
+      }
+      this.assertP(",");
+      this.adv();
+      idExpr = this.readIdExpression();
     }
   }
 
@@ -866,12 +880,7 @@ export class Parser {
   // ---- Helpers ----
 
   private readIdent(): string {
-    if (this.tok.type === TokenType.Identifier) {
-      const v = this.tok.value;
-      this.adv();
-      return v;
-    }
-    if (this.tok.type === TokenType.LatexEscape) {
+    if (this.isIdentifierOrLaTeX()) {
       const v = resolveLatex(this.tok);
       this.adv();
       return v;
@@ -942,10 +951,7 @@ export class Parser {
       this.unimplemented(
         "operator-function, conversion-function or literal-operator name parsing",
       );
-    } else if (
-      this.tok.type === TokenType.Identifier ||
-      this.tok.type === TokenType.LatexEscape
-    ) {
+    } else if (this.isIdentifierOrLaTeX()) {
       name += this.resolved(this.tok);
       this.adv();
       kind = IdPartKind.Identifier;
