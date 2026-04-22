@@ -705,7 +705,7 @@ export class Parser {
         templateParams: templateInfo.templateParameters.map((p) => p.raw),
       });
     }
-    this.unimplemented("declaration after specifier")
+    this.unimplemented("declaration after specifier");
   }
 
   // ---- Class / struct / union ----
@@ -760,11 +760,17 @@ export class Parser {
       }
     }
 
-    if (this.tok.isP("{")) {
+    // TODO bugs here for friend declaration
+    const mayDeclare = [
+      DeclSpecContextType.TopLevel,
+      DeclSpecContextType.Class,
+    ].includes(declSpecContextType);
+
+    if (mayDeclare && this.tok.isP("{")) {
       this.skipBalancedBrackets("{", "}");
       useKind = "definition";
     }
-    if (this.tok.isP(";")) {
+    if (mayDeclare && this.tok.isP(";")) {
       useKind = "declaration";
     }
 
