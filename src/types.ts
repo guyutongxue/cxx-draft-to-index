@@ -5,7 +5,7 @@ export interface SymbolEntryBase {
   inlineUnspecifiedNamespace?: boolean;
   raw: string;
   name: string;
-  languageLinkage?: "C" | "C++"; 
+  languageLinkage?: "C" | "C++";
 }
 
 export interface MacroSymbolEntry extends SymbolEntryBase {
@@ -80,7 +80,8 @@ export interface TemplateSpecializationSymbolEntry extends SymbolEntryBase {
   templateRequires?: string | null;
 }
 
-export interface DeductionGuideSymbolEntry extends SymbolEntryBase, TemplateInfo {
+export interface DeductionGuideSymbolEntry
+  extends SymbolEntryBase, TemplateInfo {
   kind: "deductionGuide";
   constructorName: string;
   parameters: string[];
@@ -93,23 +94,28 @@ type TemplateInfo = {
   templateRequires?: string | null;
 };
 
-type Templatize<T extends SymbolEntryBase> = T extends {
-  kind: infer Kind extends string;
-}
-  ? Omit<T, "kind"> & {
-      kind: `${Kind}Template`;
-    } & TemplateInfo
-  : never;
+type Computed<T> = { [K in keyof T]: T[K] };
 
-export type TypeAliasTemplateSymbolEntry = Templatize<
+type Templatize<T extends SymbolEntryBase> = Computed<
+  T extends {
+    kind: infer Kind extends string;
+  }
+    ? Omit<T, "kind"> & {
+        kind: `${Kind}Template`;
+      } & TemplateInfo
+    : never
+>;
+
+interface TypeAliasTemplateSymbolEntry extends Templatize<
   TypeAliasSymbolEntry & { syntax: "using" }
->;
-export type FunctionTemplateSymbolEntry = Templatize<FunctionSymbolEntry>;
-export type ClassTemplateSymbolEntry = Templatize<
+> {}
+
+export interface FunctionTemplateSymbolEntry extends Templatize<FunctionSymbolEntry> {}
+export interface ClassTemplateSymbolEntry extends Templatize<
   ClassSymbolEntry & { kind: "class" | "struct" }
->;
-export type VariableTemplateSymbolEntry = Templatize<VariableSymbolEntry>;
-export type OperatorTemplateSymbolEntry = Templatize<OperatorSymbolEntry>;
+> {}
+export interface VariableTemplateSymbolEntry extends Templatize<VariableSymbolEntry> {}
+export interface OperatorTemplateSymbolEntry extends Templatize<OperatorSymbolEntry> {}
 
 export interface ConceptSymbolEntry extends TemplateInfo, SymbolEntryBase {
   kind: "concept";
@@ -137,6 +143,19 @@ export type SymbolEntry =
   | DeductionGuideSymbolEntry;
 
 export type SymbolKind = SymbolEntry["kind"];
+
+export type ExtractKind<
+  T extends SymbolEntry,
+  Kind extends SymbolKind,
+> = T extends {
+  kind: infer U;
+}
+  ? U extends Kind
+    ? T
+    : never
+  : never;
+
+type X = ExtractKind<SymbolEntry, "classTemplate">;
 
 export interface HeaderIndex {
   header: string;

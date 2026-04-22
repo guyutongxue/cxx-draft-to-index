@@ -1,4 +1,5 @@
 import type {
+  ExtractKind,
   FunctionLikeMacroSymbolEntry,
   MacroSymbolEntry,
   SymbolEntry,
@@ -85,6 +86,18 @@ interface ClassSpecifierInfo {
   name: string;
   useKind: ClassSpecifierUseKind;
   raw: string;
+}
+
+interface CvQualifierSet {
+  const: boolean;
+  volatile: boolean;
+}
+
+interface DeclarationSpecifierInfo {
+  typeSpecifiers: string[];
+  cvQualifiers: CvQualifierSet;
+  declSpecifiers: DeclSpecifierSet;
+  classSpecifier: ClassSpecifierInfo | null;
 }
 
 export class Parser {
@@ -377,16 +390,16 @@ export class Parser {
     declStartLoc: Location;
     templateInfo: TemplateInfo;
     declSpecContextType: DeclSpecContextType;
-  }) {
+  }): DeclarationSpecifierInfo {
     // decl-specifier* attr-specifier*
-    let classSpecInfo: ClassSpecifierInfo | null = null;
+    let classSpecifier: ClassSpecifierInfo | null = null;
     const attributes: AttributeInfo[] = [];
     const typeSpecifiers: string[] = [];
-    const qualifiers = {
+    const cvQualifiers = {
       const: false,
       volatile: false,
     };
-    const specifiers: DeclSpecifierSet = {
+    const declSpecifiers: DeclSpecifierSet = {
       friend: false,
       typedef: false,
       constexpr: false,
@@ -433,7 +446,7 @@ export class Parser {
           "mutable",
         ].includes(id)
       ) {
-        specifiers[id as keyof DeclSpecifierSet] = true;
+        declSpecifiers[id as keyof DeclSpecifierSet] = true;
         this.adv();
         if (id === "explicit" && this.isP("(")) {
           // explicit(bool)
@@ -441,7 +454,7 @@ export class Parser {
           const startLoc = this.tok.loc;
           this.skipBalancedTokensUntilPunct([")"], false);
           const endLoc = this.tok.loc;
-          specifiers.explicit = { raw: this.lexer.range(startLoc, endLoc) };
+          declSpecifiers.explicit = { raw: this.lexer.range(startLoc, endLoc) };
         }
         continue;
       } else if (
@@ -467,7 +480,7 @@ export class Parser {
       } else if (id === "auto") {
         this.unimplemented("auto");
       } else if (["class", "struct", "union"].includes(id)) {
-        classSpecInfo = this.parseClassSpecifier({
+        classSpecifier = this.parseClassSpecifier({
           declStartLoc,
           templateInfo,
           declSpecContextType,
@@ -477,7 +490,7 @@ export class Parser {
         // enum E { } e; // enum-specifier
         this.unimplemented("enum-head");
       } else if (id === "const" || id === "volatile") {
-        qualifiers[id] = true;
+        cvQualifiers[id] = true;
         this.adv();
       } else if (id === "typename") {
         this.unimplemented("typename disambiguation");
@@ -489,10 +502,12 @@ export class Parser {
         break;
       }
     }
-    if (classSpecInfo) {
-      console.log(classSpecInfo);
-    }
-    this.die("wip");
+    return {
+      typeSpecifiers,
+      cvQualifiers,
+      declSpecifiers,
+      classSpecifier,
+    };
   }
 
   // ---- Namespace ----
@@ -505,7 +520,7 @@ export class Parser {
     this.assertId("namespace");
     this.adv(); // "namespace"
 
-    const attributes = this.tryParseAttribute();
+    this.tryParseAttribute();
 
     let name = "";
     while (this.tok.type === TokenType.Identifier) {
@@ -676,11 +691,21 @@ export class Parser {
       return this.parseUsingDirectiveOrDeclaration({ startLoc, templateInfo });
     }
 
-    this.parseDeclarationSpecifiers({
+    const { classSpecifier } = this.parseDeclarationSpecifiers({
       declStartLoc: startLoc,
       templateInfo,
       declSpecContextType: DeclSpecContextType.TopLevel,
     });
+
+    // TODO should we handle here?
+    if (classSpecifier) {
+      this.emitSymbol("classTemplate", {
+        name: classSpecifier.name,
+        raw: this.lexer.range(startLoc, this.tok.loc),
+        templateParams: templateInfo.templateParameters.map((p) => p.raw),
+      });
+    }
+    this.unimplemented("declaration after specifier")
   }
 
   // ---- Class / struct / union ----
@@ -916,7 +941,7 @@ export class Parser {
   private emitSymbol<Kind extends SymbolKind>(
     kind: Kind,
     info: Omit<
-      Extract<SymbolEntry, { kind: Kind }>,
+      ExtractKind<SymbolEntry, Kind>,
       Exclude<keyof SymbolEntryBase, "raw" | "name"> | "kind"
     >,
   ): void {
