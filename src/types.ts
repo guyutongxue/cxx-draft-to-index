@@ -74,10 +74,13 @@ export interface NamespaceAliasSymbolEntry extends SymbolEntryBase {
   targetNamespace: string; // e.g. "ranges::views"
 }
 
-export interface TemplateSpecializationSymbolEntry extends SymbolEntryBase {
-  kind: "partialTemplateSpecialization" | "fullTemplateSpecialization";
-  templateParams?: string[];
-  templateRequires?: string | null;
+export interface PartialTemplateSpecializationSymbolEntry extends SymbolEntryBase, TemplateInfo {
+  kind: "partialTemplateSpecialization";
+  templateArgs: string[]; // raw template argument strings for now
+}
+export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
+  kind: "fullTemplateSpecialization";
+  templateArgs: string[]; // raw template argument strings for now
 }
 
 export interface DeductionGuideSymbolEntry
@@ -133,7 +136,8 @@ export type SymbolEntry =
   | UsingDeclarationSymbolEntry
   | UsingDirectiveSymbolEntry
   | NamespaceAliasSymbolEntry
-  | TemplateSpecializationSymbolEntry
+  | PartialTemplateSpecializationSymbolEntry
+  | FullTemplateSpecializationSymbolEntry
   | TypeAliasTemplateSymbolEntry
   | FunctionTemplateSymbolEntry
   | ClassTemplateSymbolEntry
