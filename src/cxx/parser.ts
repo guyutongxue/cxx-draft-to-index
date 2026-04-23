@@ -19,8 +19,7 @@ interface TemplateParameter {
 interface TemplateInfo {
   // explicitInstantiation?: boolean;
 
-  // Full specialization, not partial
-  specialization: boolean;
+  fullSpecialization: boolean;
   templateParameters: TemplateParameter[];
 
   requiresClause: string | null;
@@ -108,7 +107,9 @@ export class Parser {
   symbols: SymbolEntry[];
 
   /** current token */
-  private tok: Token;
+  private get tok() {
+    return this.lexer.tok;
+  }
   private nextTok(): Token {
     return this.lexer.peek();
   }
@@ -118,14 +119,14 @@ export class Parser {
     this.header = header;
     this.nsStack = [];
     this.symbols = [];
-    this.tok = lexer.next();
   }
 
   // ---- Token helpers ----
 
+  /** @returns old token */
   private adv(): Token {
     const t = this.tok;
-    this.tok = this.lexer.next();
+    this.lexer.next();
     return t;
   }
 
@@ -411,11 +412,19 @@ export class Parser {
           raw: classSpecifier.raw + ";",
         });
       } else if (templateInfo) {
-        this.emitSymbol("classTemplate", {
-          name: classSpecifier.name,
-          raw: this.lexer.range(startLoc, this.tok.loc),
-          templateParams: templateInfo.templateParameters.map((p) => p.raw),
-        });
+        if (templateInfo.fullSpecialization) {
+          this.emitSymbol("fullTemplateSpecialization", {
+            name: classSpecifier.name,
+            raw: this.lexer.range(startLoc, this.tok.loc),
+          });
+          // TODO partial specialization
+        } else {
+          this.emitSymbol("classTemplate", {
+            name: classSpecifier.name,
+            raw: this.lexer.range(startLoc, this.tok.loc),
+            templateParams: templateInfo.templateParameters.map((p) => p.raw),
+          });
+        }
       } else {
         this.emitSymbol("class", {
           name: classSpecifier.name,
@@ -727,7 +736,7 @@ export class Parser {
       }
     }
     const templateInfo: TemplateInfo = {
-      specialization,
+      fullSpecialization: specialization,
       templateParameters,
       requiresClause,
     };
@@ -782,7 +791,7 @@ export class Parser {
     const { name, parts } = this.readIdExpression();
 
     // TODO: recover partial specialization from parts.at(-1)
-    if (!templateInfo?.specialization) {
+    if (!templateInfo?.fullSpecialization) {
       assert(parts.length === 1);
     }
     // MISSED HERE:

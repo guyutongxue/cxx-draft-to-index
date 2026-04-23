@@ -61,6 +61,11 @@ export class Lexer {
   /** src.length */
   private readonly srcLen: number;
   public readonly lines: string[];
+  
+  #tok: Token;
+  get tok(): Token {
+    return this.#tok;
+  }
 
   constructor(src: string) {
     this.src = src;
@@ -69,6 +74,7 @@ export class Lexer {
     this.col = 1;
     this.srcLen = this.src.length;
     this.lines = src.split("\n");
+    this.#tok = this.lex();
   }
 
   get loc(): Location {
@@ -131,7 +137,7 @@ export class Lexer {
     }
   }
 
-  next(): Token {
+  private lex(): Token {
     this.skipWhitespaceAndComments();
     const loc = this.loc;
 
@@ -223,15 +229,20 @@ export class Lexer {
     throw new Error(`Unknown token: \`${this.getN(10)}\` ...`);
   }
 
+  next() {
+    this.#tok = this.lex();
+    return this.#tok;
+  }
+
   peek(): Token {
     const sp = this.pos;
     const sl = this.line;
     const sc2 = this.col;
-    const tok = this.next();
+    const nextTok = this.lex();
     this.pos = sp;
     this.line = sl;
     this.col = sc2;
-    return tok;
+    return nextTok;
   }
 
   range(startLoc: Location, endLoc: Location): string {
