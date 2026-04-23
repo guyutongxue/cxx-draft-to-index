@@ -85,6 +85,7 @@ export class Lexer {
     cloned.pos = this.pos;
     cloned.line = this.line;
     cloned.col = this.col;
+    cloned.#tok = this.#tok;
     return cloned;
   }
 

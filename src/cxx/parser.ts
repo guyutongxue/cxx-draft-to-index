@@ -7,7 +7,6 @@ import type {
 import { resolveLatex } from "./latex";
 import { Lexer, Location, Token, TokenType } from "./lexer";
 import { produce } from "immer";
-import assert from "node:assert";
 
 interface ParserContext {
   // TODO support class/enum scope
@@ -134,7 +133,7 @@ interface DeclarationSpecifierInfo {
 interface DeclaratorInfo {}
 
 export class Parser {
-  private readonly header: string;
+  private readonly filename: string;
 
   private lexer: Lexer;
   private context: ParserContext;
@@ -147,9 +146,9 @@ export class Parser {
     return this.lexer.peek();
   }
 
-  constructor(lexer: Lexer, header: string) {
+  constructor(lexer: Lexer, filename: string) {
     this.lexer = lexer;
-    this.header = header;
+    this.filename = filename;
     this.context = {
       nsStack: [],
       symbols: [],
@@ -182,15 +181,17 @@ export class Parser {
     );
   }
 
-  private assertId(v: string): void {
-    if (!this.isId(v)) {
-      this.die(`Expected \`${v}\``);
+  private assert(value: unknown, message: string): asserts value {
+    if (!value) {
+      this.die(message);
     }
   }
+
+  private assertId(v: string): void {
+    this.assert(this.isId(v), `Expected \`${v}\``);
+  }
   private assertP(v: string): void {
-    if (!this.isP(v)) {
-      this.die(`Expected \`${v}\``);
-    }
+    this.assert(this.isP(v), `Expected \`${v}\``);
   }
 
   private eof(): boolean {
@@ -341,7 +342,7 @@ export class Parser {
   private die(msg: string): never {
     const line = this.lexer.lines[this.tok.loc.line - 1] || "";
     throw new Error(
-      `${this.header}:${this.tok.loc.line}:${this.tok.loc.col}: ${line}\n    ${msg} at token \`${this.tok.value}\` ...`,
+      `${this.filename}:${this.tok.loc.line}:${this.tok.loc.col}: ${line}\n    ${msg} at token \`${this.tok.value}\` ...`,
     );
   }
   private unimplemented(name?: string): never {
@@ -478,14 +479,14 @@ export class Parser {
     const { classSpecifier } = declSpecifier;
     if (classSpecifier && classSpecifier.useKind !== "reference") {
       if (classSpecifier.tagKind === "union") {
-        assert(!templateInfo, "union cannot be template");
+        this.assert(!templateInfo, "union cannot be template");
         this.emitSymbol("union", {
           name: classSpecifier.name,
           raw: classSpecifier.raw + ";",
         });
       } else if (templateInfo) {
         if (templateInfo.fullSpecialization) {
-          assert(
+          this.assert(
             classSpecifier.templateArgs,
             "full specialization must have template args",
           );
@@ -530,7 +531,6 @@ export class Parser {
   }): DeclarationSpecifierInfo {
     // decl-specifier* attr-specifier*
     let classSpecifier: ClassSpecifierInfo | null = null;
-    const attributes: AttributeInfo[] = [];
     const typeSpecifiers: string[] = [];
     const cvQualifiers = {
       const: false,
@@ -538,16 +538,35 @@ export class Parser {
     };
     const declSpecifiers: DeclSpecifierKeyword[] = [];
     let explicit: boolean | ExpressionInfo = false;
-    let shouldReadIdExpression = false;
+
+    const readIdExprAsType = (): { isCtor: boolean } => {
+      // We hits an id-expression while parsing decl-specifier.
+      // It might be the declarator of ctor declaration which is not a type-specifier
+      const isCtor = this.isCtorDeclaration({
+        scopeClassName,
+        declSpecContextType,
+      });
+      if (!isCtor) {
+        const idExpression = this.readIdExpression();
+        typeSpecifiers.push(idExpression.name);
+      }
+      return { isCtor };
+    };
 
     while (true) {
       if (this.isP("[") && this.nextTok().isP("[")) {
         // attribute-specifier should marks end of decl-specifiers
         break;
-      } else if (this.isP("::") || this.tok.type === TokenType.LatexEscape) {
-        assert(typeSpecifiers.length == 0);
-        shouldReadIdExpression = true;
-        break;
+      } else if (
+        // read a scoped/escaped id-expr as type-id
+        // only if no type has been specified
+        typeSpecifiers.length === 0 &&
+        (this.isP("::") || this.tok.type === TokenType.LatexEscape)
+      ) {
+        const { isCtor } = readIdExprAsType();
+        if (isCtor) {
+          break;
+        }
       }
       if (this.tok.type !== TokenType.Identifier) {
         break;
@@ -592,20 +611,14 @@ export class Parser {
       } else if (id === "typename") {
         this.unimplemented("typename disambiguation");
       } else if (typeSpecifiers.length === 0) {
-        // We hits an id-expression while parsing decl-specifier,
-        // which may be the declarator of ctor declaration,
-        // which is not a type-specifier
-        shouldReadIdExpression = !this.isCtorDeclaration({
-          scopeClassName,
-          declSpecContextType,
-        });
+        const { isCtor } = readIdExprAsType();
+        if (isCtor) {
+          break;
+        }
       } else {
+        // start of declarator, stop
         break;
       }
-    }
-    if (shouldReadIdExpression) {
-      const idExpression = this.readIdExpression();
-      typeSpecifiers.push(idExpression.name);
     }
     this.tryParseAttribute();
     return {
@@ -725,7 +738,10 @@ export class Parser {
     // using X = Y;
     if (this.isP("=")) {
       const { name, parts } = idExpr;
-      assert(parts.length === 1);
+      this.assert(
+        parts.length === 1 && parts[0].kind === IdPartKind.Identifier,
+        `Name introduced by using-alias-declaration should be identifier`,
+      );
       this.adv();
       this.skipBalancedTokensUntilPunct([",", ";"], true);
       if (this.isP(";")) this.adv();
@@ -898,7 +914,11 @@ export class Parser {
 
     const templateArgs = idExpr.parts.at(-1)?.templateArgs ?? null;
     if (mayDeclare && !templateArgs) {
-      assert(idExpr.parts.length === 1);
+      this.assert(
+        idExpr.parts.length === 1 &&
+          idExpr.parts[0].kind === IdPartKind.Identifier,
+        "Name of class declaration or definition should be a simple identifier",
+      );
     }
 
     if (mayDeclare && this.tok.isP("{")) {
@@ -986,8 +1006,9 @@ export class Parser {
 
   private tryReadIdExpression(): IdExpressionInfo | null {
     try {
-      using _transaction = this.createRevertTransaction();
+      using transaction = this.createRevertTransaction();
       const idExpr = this.readIdExpression();
+      transaction.commit();
       return idExpr;
     } catch {
       return null;
@@ -1014,7 +1035,6 @@ export class Parser {
           hasTemplateDisambiguation = true;
           this.adv();
         }
-        continue;
       }
       const part = this.readIdExpressionPart(hasTemplateDisambiguation);
       parts.push(part);
@@ -1094,7 +1114,7 @@ export class Parser {
   private nameAtCurrentScope({ parts }: IdExpressionInfo): string {
     const copy = [...parts];
     const lastPart = copy.pop();
-    assert(lastPart?.componentName, `Cannot name a computed type-id`);
+    this.assert(lastPart?.componentName, `Cannot name a computed type-id`);
     if (copy.length === 0) {
       // unqualified-id, return its name directly
       return lastPart.componentName;
@@ -1117,7 +1137,7 @@ export class Parser {
     using _transaction = this.createRevertTransaction();
     const idExpr = this.readIdExpression();
     const lastPart = idExpr.parts.at(-1);
-    assert(lastPart);
+    this.assert(lastPart, "id-expression should have at least one part");
     if (lastPart.kind !== IdPartKind.Identifier) {
       // dtor
       return false;
@@ -1184,7 +1204,10 @@ export class Parser {
       // must be a ptr-to-member declarator
       // e.g. `C (D::* p);`
       //          ^ we are here
-      assert(this.isIdentifierOrLaTeX());
+      this.assert(
+        this.isIdentifierOrLaTeX(),
+        "Expected identifier in ptr-to-member declarator",
+      );
       return false;
     }
     // already read another id-expression `T`, if we see
@@ -1242,7 +1265,7 @@ export class Parser {
     const symbol = {
       kind,
       ...info,
-      header: this.header,
+      header: this.filename,
       namespace: this.context.nsStack.join("::"),
       // indicates a CPO
       // TODO inlineUnspecifiedNamespace
