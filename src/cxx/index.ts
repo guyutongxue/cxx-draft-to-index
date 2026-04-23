@@ -4,8 +4,9 @@ import { Parser } from "./parser";
 import { preprocessCode } from "./pp";
 
 export function parseCodeblock(code: string, header: string): SymbolEntry[] {
-  // (because @...@ LaTeX escapes interfere with token-level #define parsing)
   const { preprocessedCode, macroSymbols } = preprocessCode(code, header);
+
+  if (header!="iterator")return[];
 
   const lexer = new Lexer(preprocessedCode);
   const parser = new Parser(lexer, header);

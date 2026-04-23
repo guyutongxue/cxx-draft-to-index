@@ -103,6 +103,7 @@ interface IdExpressionPartInfo {
 
 interface IdExpressionInfo {
   name: string;
+  fromGlobal: boolean;
   parts: IdExpressionPartInfo[];
 }
 
@@ -933,7 +934,7 @@ export class Parser {
     const raw = this.lexer.range(startLoc, endLoc);
     return {
       tagKind,
-      name: this.nameAtCurrentScope(idExpr),
+      name: this.nameWithoutTemplateArg(idExpr),
       templateArgs,
       useKind,
       raw,
@@ -1024,6 +1025,7 @@ export class Parser {
    */
   private readIdExpression(): IdExpressionInfo {
     const parts: IdExpressionPartInfo[] = [];
+    const fromGlobal = this.isP("::");
     let name = "";
     do {
       let hasTemplateDisambiguation = false;
@@ -1046,7 +1048,7 @@ export class Parser {
         break;
       }
     } while (this.isP("::"));
-    return { name, parts };
+    return { name, fromGlobal, parts };
   }
 
   private readIdExpressionPart(
@@ -1106,25 +1108,15 @@ export class Parser {
     return { kind, name, componentName, templateArgs };
   }
 
-  /**
-   * Gets the name of an ID expression at the current scope.
-   * If param id-expression is unqualified, return it as-is;
-   * Otherwise, prepend current namespaces and enclosing class names
-   */
-  private nameAtCurrentScope({ parts }: IdExpressionInfo): string {
-    const copy = [...parts];
+  /** Used for specialization declarations */
+  private nameWithoutTemplateArg(idExpr: IdExpressionInfo): string {
+    const copy = [...idExpr.parts];
     const lastPart = copy.pop();
-    this.assert(lastPart?.componentName, `Cannot name a computed type-id`);
-    if (copy.length === 0) {
-      // unqualified-id, return its name directly
-      return lastPart.componentName;
-    }
-    const scopes = [
-      "",
-      ...this.context.nsStack,
-      ...copy.map((p) => p.name),
-    ].join("::");
-    return scopes + "::" + (lastPart.componentName ?? lastPart.name);
+    this.assert(
+      lastPart?.componentName,
+      `Cannot call nameWithoutTemplateArg on a computed type-id`,
+    );
+    return `${idExpr.fromGlobal ? "::" : ""}${copy.map((p) => p.name + "::").join("")}${lastPart.componentName}`;
   }
 
   private isCtorDeclaration({
