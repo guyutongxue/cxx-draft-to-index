@@ -44,7 +44,6 @@ export class Token implements IToken {
   isEof(): boolean {
     return this.type === TokenType.EOF;
   }
-
 }
 
 // ============================================================
@@ -61,7 +60,7 @@ export class Lexer {
   /** src.length */
   private readonly srcLen: number;
   public readonly lines: string[];
-  
+
   #tok: Token;
   get tok(): Token {
     return this.#tok;
@@ -246,6 +245,9 @@ export class Lexer {
   }
 
   range(startLoc: Location, endLoc: Location): string {
-    return this.src.slice(startLoc.offset, endLoc.offset);
+    return this.src
+      .slice(startLoc.offset, endLoc.offset)
+      .replace(/\/\/.*/gm, "")
+      .trim();
   }
 }

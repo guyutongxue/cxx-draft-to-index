@@ -924,13 +924,13 @@ export class Parser {
     this.assertP("=");
     this.adv(); // =
     this.parseConstraintExpression();
+    this.assertP(";");
+    this.adv(); // ;
     this.emitSymbol("concept", {
       name,
       raw: this.lexer.range(startLoc, this.tok.loc),
       templateParams: templateInfo.templateParameters.map((p) => p.raw),
     });
-    this.assertP(";");
-    this.adv(); // ;
   }
 
   // ---- Expression ----
