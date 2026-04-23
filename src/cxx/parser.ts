@@ -131,7 +131,7 @@ interface DeclarationSpecifierInfo {
   classSpecifier: ClassSpecifierInfo | null;
 }
 
-interface DeclaratorInfo { }
+interface DeclaratorInfo {}
 
 export class Parser {
   private readonly header: string;
@@ -437,11 +437,11 @@ export class Parser {
     });
   }
 
-  private parseLinkage({ }: { startLoc: Location }) {
+  private parseLinkage({}: { startLoc: Location }) {
     this.unimplemented("linkage specification");
   }
 
-  private parseExportDeclaration({ }: { startLoc: Location }) {
+  private parseExportDeclaration({}: { startLoc: Location }) {
     this.unimplemented("export declaration");
   }
 
@@ -485,7 +485,10 @@ export class Parser {
         });
       } else if (templateInfo) {
         if (templateInfo.fullSpecialization) {
-          assert(classSpecifier.templateArgs, "full specialization must have template args");
+          assert(
+            classSpecifier.templateArgs,
+            "full specialization must have template args",
+          );
           this.emitSymbol("fullTemplateSpecialization", {
             name: classSpecifier.name,
             raw: this.lexer.range(startLoc, this.tok.loc),
@@ -553,9 +556,7 @@ export class Parser {
       if (id === "decltype") {
         // decltype(...)
         this.unimplemented("decltype in decl-specifier");
-      } else if (
-        (DECL_SPECIFIER_KEYWORD as readonly string[]).includes(id)
-      ) {
+      } else if ((DECL_SPECIFIER_KEYWORD as readonly string[]).includes(id)) {
         declSpecifiers.push(id as DeclSpecifierKeyword);
         this.adv();
         if (id === "explicit" && this.isP("(")) {
@@ -616,8 +617,11 @@ export class Parser {
     };
   }
 
-  private parseDeclaratorList({ declSpecifier }: { declSpecifier: DeclarationSpecifierInfo }): DeclaratorInfo[] {
-
+  private parseDeclaratorList({
+    declSpecifier,
+  }: {
+    declSpecifier: DeclarationSpecifierInfo;
+  }): DeclaratorInfo[] {
     this.unimplemented("declarator");
   }
 
@@ -1095,7 +1099,11 @@ export class Parser {
       // unqualified-id, return its name directly
       return lastPart.componentName;
     }
-    const scopes = ["", ...this.context.nsStack, ...copy.map((p) => p.name)].join("::");
+    const scopes = [
+      "",
+      ...this.context.nsStack,
+      ...copy.map((p) => p.name),
+    ].join("::");
     return scopes + "::" + (lastPart.componentName ?? lastPart.name);
   }
 
@@ -1152,12 +1160,20 @@ export class Parser {
       // must be attribute of parameter declaration
       this.assertP("[");
       return true;
-    } else if (this.tok.type === TokenType.Identifier && [
-      ...DECL_SPECIFIER_KEYWORD,
-      ...TYPE_SPECIFIER_KEYWORD,
-      ...CLASS_SPECIFIER_KEYWORD,
-      "auto", "decltype", "enum", "typename", "const", "volatile",
-    ].includes(this.tok.value)) {
+    } else if (
+      this.tok.type === TokenType.Identifier &&
+      [
+        ...DECL_SPECIFIER_KEYWORD,
+        ...TYPE_SPECIFIER_KEYWORD,
+        ...CLASS_SPECIFIER_KEYWORD,
+        "auto",
+        "decltype",
+        "enum",
+        "typename",
+        "const",
+        "volatile",
+      ].includes(this.tok.value)
+    ) {
       return true;
     } else if (this.isP("*") || this.isP("&") || this.isP("&&")) {
       // ptr-declarator
@@ -1181,13 +1197,17 @@ export class Parser {
     // - ...        : e.g. C(T...);
     // then it must be a ctor declaration, otherwise we cannot disambiguate AT ALL.
     this.tryParseAttribute();
-    if (this.isIdentifierOrLaTeX() ||
+    if (
+      this.isIdentifierOrLaTeX() ||
       (this.tok.type === TokenType.Punct &&
         ["*", "&", "&&", ",", "..."].includes(this.tok.value)) ||
-      (this.isP("(") && declSpecContextType === DeclSpecContextType.Class)) {
+      (this.isP("(") && declSpecContextType === DeclSpecContextType.Class)
+    ) {
       return true;
     }
-    this.die(`Disambiguate failure: cannot determine whether current declaration is a constructor`);
+    this.die(
+      `Disambiguate failure: cannot determine whether current declaration is a constructor`,
+    );
   }
 
   private createRevertTransaction() {
