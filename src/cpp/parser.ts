@@ -22,6 +22,8 @@ interface TemplateInfo {
   // Full specialization, not partial
   specialization: boolean;
   templateParameters: TemplateParameter[];
+
+  requiresClause: string | null;
 }
 
 enum DeclSpecContextType {
@@ -545,6 +547,7 @@ export class Parser {
     }
     if (shouldReadIdExpression) {
       // TODO check this later
+      // BUGS constructor
       const { name } = this.readIdExpression();
       typeSpecifiers.push(name);
     }
@@ -700,6 +703,7 @@ export class Parser {
     startLoc: Location;
   }): void {
     const templateParameters = [];
+    let requiresClause: string | null = null;
     this.assertId("template");
     // there might be multiple template header...
     // we just keep the code structure but do not touch it now
@@ -715,12 +719,17 @@ export class Parser {
       }
       templateParameters.push(...params);
       if (this.isId("requires")) {
-        this.unimplemented("requires-clause");
+        this.adv(); // requires
+        const startLoc = this.tok.loc;
+        this.parseConstraintExpression();
+        const endLoc = this.tok.loc;
+        requiresClause = this.lexer.range(startLoc, endLoc);
       }
     }
     const templateInfo: TemplateInfo = {
       specialization,
       templateParameters,
+      requiresClause,
     };
     if (this.isId("concept")) {
       return this.parseConcept({ templateInfo, startLoc });
