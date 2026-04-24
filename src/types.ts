@@ -44,6 +44,7 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
   kind: "function";
   constexpr?: boolean;
   returnType: string;
+  isTrailingReturnType: boolean;
   parameters: string[]; // raw parameter strings for now
   // void foo() requires <constraints>;
   // signatureRequires?: string | null;

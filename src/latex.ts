@@ -9,6 +9,34 @@ export interface HeaderSynopsis {
 
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
 
+const PATCHES = {
+  "algorithms.tex": [
+    [
+      `    constexpr OutputIterator fill_n(OutputIterator first, Size n, const T& value)`,
+      `    constexpr OutputIterator fill_n(OutputIterator first, Size n, const T& value);`,
+    ],
+    [
+      `             class T = projected_value_t<I, Proj,`,
+      `             class T = projected_value_t<I, Proj>,`,
+    ],
+  ],
+} as Record<string, [string, string][]>;
+
+function applyPatches(fileName: string, content: string): string {
+  const patches = PATCHES[fileName];
+  if (!patches) return content;
+
+  let patchedContent = content;
+  for (const [target, replacement] of patches) {
+    const newContent = patchedContent.replace(target, replacement);
+    if (newContent === patchedContent) {
+      throw new Error(`Patch target not found in ${fileName}: "${target}"`);
+    }
+    patchedContent = newContent;
+  }
+  return patchedContent;
+}
+
 type AnyTuple = [unknown, ...unknown[]];
 
 export async function loadAllTexFiles(): Promise<Map<string, string>> {
@@ -22,7 +50,7 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
 
   return new Map(
     await Promise.all(
-      files.entries().map(async ([k, v]) => [k, await v] satisfies AnyTuple),
+      files.entries().map(async ([k, v]) => [k, applyPatches(k, await v)] satisfies AnyTuple),
     ),
   );
 }

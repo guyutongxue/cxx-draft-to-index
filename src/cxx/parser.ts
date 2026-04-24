@@ -598,11 +598,11 @@ export class Parser {
             this.emitSymbol("functionTemplate", {
               name: declarator.idExpr.name,
               parameters: declarator.function.params.map((p) => p.raw),
-              // TODO should omit ; if definition
-              raw: this.lexer.range(startLoc, this.tok.loc) + ";",
+              raw: this.lexer.range(startLoc, this.tok.loc),
               returnType:
                 declarator.function.trailingReturnType ??
                 declSpecifier.typeSpecifiers.join(" "),
+              isTrailingReturnType: !!declarator.function.trailingReturnType,
               templateParams: templateInfo.templateParameters.map((p) => p.raw),
               constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
               templateRequires: templateInfo.requiresClause,
@@ -620,6 +620,17 @@ export class Parser {
             });
           }
           break;
+        } else {
+          this.emitSymbol("function", {
+            name: declarator.idExpr.name,
+            parameters: declarator.function.params.map((p) => p.raw),
+            raw: declSpecifier.raw + " " + declarator.raw + ";",
+            returnType:
+              declarator.function.trailingReturnType ??
+              declSpecifier.typeSpecifiers.join(" "),
+            isTrailingReturnType: !!declarator.function.trailingReturnType,
+            constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
+          });
         }
       } else {
         const entry = {
@@ -1332,6 +1343,7 @@ export class Parser {
       this.adv();
     }
     if (this.isId("noexcept")) {
+      this.adv(); // noexcept
       qualifiers.noexcept = true;
       if (this.isP("(")) {
         this.adv(); // (
@@ -1350,7 +1362,7 @@ export class Parser {
       this.adv(); // ->
       const startLoc = this.tok.loc;
       // LOOSE PARSE: skip trailing return type
-      this.skipBalancedTokensUntilPunct([",", "{"], true);
+      this.skipBalancedTokensUntilPunct([",", "{", ";"], true);
       const endLoc = this.tok.loc;
       trailingReturnType = this.lexer.range(startLoc, endLoc);
     }
