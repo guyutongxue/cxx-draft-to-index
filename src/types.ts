@@ -34,7 +34,7 @@ export interface TypeAliasSymbolEntry extends SymbolEntryBase {
 
 export interface VariableSymbolEntry extends SymbolEntryBase {
   kind: "variable";
-  type: "string";
+  type: string;
   constexpr?: boolean;
   inline?: boolean;
   extern?: boolean;

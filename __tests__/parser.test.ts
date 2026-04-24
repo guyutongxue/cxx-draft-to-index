@@ -35,3 +35,17 @@ struct N::S<int> {};
     templateArgs: ["int"],
   });
 });
+
+test("complex declarator", () => {
+  const code = `
+volatile int (*const ptrArr)[42];
+    `;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  parser.parseTopLevel();
+  expect(parser.symbols[0]).toMatchObject({
+    kind: "variable",
+    name: "ptrArr",
+    type: "volatile int (*const)[42]",
+  });
+});
