@@ -23,6 +23,12 @@ interface TemplateParameterInfo {
   raw: string;
 }
 
+interface ParameterInfo {
+  // we might be able to provide precise parsing
+  // but skip now
+  raw: string;
+}
+
 interface TemplateInfo {
   // explicitInstantiation?: boolean;
 
@@ -74,6 +80,8 @@ const TYPE_SPECIFIER_KEYWORD = [
   "bool",
 ];
 const CLASS_SPECIFIER_KEYWORD = ["class", "struct", "union"];
+
+type VertSpecifierKw = "override" | "final";
 
 type DeclSpecifierKeyword = (typeof DECL_SPECIFIER_KEYWORD)[number];
 
@@ -133,16 +141,21 @@ interface DeclarationSpecifierInfo {
 }
 
 interface DeclaratorInfo {
-  name: string;
+  idExpr: IdExpressionInfo;
   // no declspec
   raw: string;
   /** type-id, e.g. `int (*) ()` */
   typeInfo: string;
-  isFunction: boolean;
+  function: FunctionInfo | null;
 }
 
 interface InitDeclaratorInfo extends DeclaratorInfo {
   initializer: string | null; // raw string?
+}
+
+interface DeclaratorListInfo {
+  declarators: InitDeclaratorInfo[];
+  kind: "simple" | "functionDefinition" | "friendType" | "deductionGuide";
 }
 
 interface FunctionQualifierInfo {
@@ -152,13 +165,18 @@ interface FunctionQualifierInfo {
   noexcept: boolean | ExpressionInfo;
 }
 
+interface FunctionInfo {
+  kind: "function";
+  params: ParameterInfo[];
+  qualifiers: FunctionQualifierInfo;
+  trailingReturnType: string | null;
+  vertSpecifiers: VertSpecifierKw[];
+  constraint: ExpressionInfo | null;
+  contracts: { raw: string }[];
+}
+
 type DeclaratorSurrounding =
-  | {
-      kind: "function";
-      params: DeclaratorInfo[];
-      qualifiers: FunctionQualifierInfo;
-      trailingReturnType: string | null;
-    }
+  | FunctionInfo
   | {
       kind: "array";
       size: string; // raw
@@ -168,7 +186,7 @@ type DeclaratorSurrounding =
     };
 
 interface PartialDeclaratorInfo {
-  name: string;
+  idExpr: IdExpressionInfo;
   surrounding: DeclaratorSurrounding[];
 }
 
@@ -520,10 +538,10 @@ export class Parser {
       contextType,
     });
 
-    let declarators: DeclaratorInfo[] = [];
+    let declaratorList: DeclaratorListInfo | null = null;
 
     if (!this.isP(";")) {
-      declarators = this.parseDeclaratorList({ declSpecifier });
+      declaratorList = this.parseDeclaratorList({ declSpecifier });
     }
     this.adv(); // ;
     const { classSpecifier } = declSpecifier;
@@ -566,12 +584,46 @@ export class Parser {
         });
       }
     }
-    for (const declarator of declarators) {
-      if (declarator.isFunction) {
-        // TODO
+    if (!declaratorList) {
+      return;
+    }
+    for (const declarator of declaratorList.declarators) {
+      if (declarator.function) {
+        if (templateInfo) {
+          this.assert(
+            declaratorList.declarators.length === 1,
+            "Function template cannot have multiple declarators",
+          );
+          if (!templateInfo.fullSpecialization) {
+            this.emitSymbol("functionTemplate", {
+              name: declarator.idExpr.name,
+              parameters: declarator.function.params.map((p) => p.raw),
+              // TODO should omit ; if definition
+              raw: this.lexer.range(startLoc, this.tok.loc) + ";",
+              returnType:
+                declarator.function.trailingReturnType ??
+                declSpecifier.typeSpecifiers.join(" "),
+              templateParams: templateInfo.templateParameters.map((p) => p.raw),
+              constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
+              templateRequires: templateInfo.requiresClause,
+            });
+          } else {
+            const lastPart = declarator.idExpr.parts.at(-1);
+            this.assert(
+              lastPart?.templateArgs,
+              `full template specialization should have template args`,
+            );
+            this.emitSymbol("fullTemplateSpecialization", {
+              name: declarator.idExpr.name,
+              raw: this.lexer.range(startLoc, this.tok.loc),
+              templateArgs: lastPart.templateArgs.map((a) => a.raw),
+            });
+          }
+          break;
+        }
       } else {
         const entry = {
-          name: declarator.name,
+          name: declarator.idExpr.name,
           raw: declSpecifier.raw + " " + declarator.raw + ";",
           type: declarator.typeInfo,
           constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
@@ -619,7 +671,8 @@ export class Parser {
     const readIdExprAsType = (): { isCtor: boolean } => {
       // We hits an id-expression while parsing decl-specifier.
       // It might be the declarator of ctor declaration which is not a type-specifier
-      const isCtor = this.isCtorDeclaration({
+      const isCtor = this.isCtorOrDeductionGuide({
+        declSpecifiers: [...declSpecifiers],
         scopeClassName,
         contextType,
       });
@@ -674,7 +727,13 @@ export class Parser {
         this.adv();
         continue;
       } else if (id === "auto") {
-        this.unimplemented("auto");
+        this.assert(
+          typeSpecifiers.length < 2,
+          `in a decl-specifier, only "auto" and "Constr auto" is allowed`,
+        );
+        typeSpecifiers.push("auto");
+        this.adv();
+        continue;
       } else if (CLASS_SPECIFIER_KEYWORD.includes(id)) {
         classSpecifier = this.parseClassSpecifier({
           previousSpecifiers: [...declSpecifiers],
@@ -717,18 +776,32 @@ export class Parser {
     declSpecifier,
   }: {
     declSpecifier: DeclarationSpecifierInfo;
-  }): InitDeclaratorInfo[] {
+  }): DeclaratorListInfo {
     let declarators: InitDeclaratorInfo[] = [];
-    while (true) {
+    let kind: DeclaratorListInfo["kind"] = "simple";
+    outermost: while (true) {
+      // friend class A, class B;
+      // friend class Ts...;
+      if (
+        declSpecifier.declSpecifiers[0] === "friend" &&
+        (this.isP(",") || this.isP("..."))
+      ) {
+        this.unimplemented("rest friend-types");
+      }
       const declarator = this.parseDeclarator({
         declSpecifier,
       });
       let initializer: string | null = null;
-      if (declarator.isFunction) {
-        this.unimplemented("function");
-        // TODO requires
-        // TODO pre/post
-        // TODO `{` starts function body, `=default/delete(reason)`
+      if (declarator.function) {
+        if (this.isP("=")) {
+          // = 0, = default, = delete (reason)
+          this.unimplemented("pure, defaulted or deleted function");
+        }
+        if (this.isP("{")) {
+          this.skipBalancedBrackets("{", "}");
+          kind = "functionDefinition";
+          break outermost;
+        }
       } else {
         if (this.isP("=")) {
           // int v = x;
@@ -753,7 +826,7 @@ export class Parser {
       this.assertP(",");
       this.adv(); // ,
     }
-    return declarators;
+    return { declarators, kind };
   }
 
   private parseDeclarator({
@@ -762,7 +835,7 @@ export class Parser {
     declSpecifier: DeclarationSpecifierInfo;
   }): DeclaratorInfo {
     const startLoc = this.tok.loc;
-    const { name, surrounding } = this.parseDeclaratorImpl();
+    const { idExpr, surrounding } = this.parseDeclaratorImpl(0);
     const endLoc = this.tok.loc;
     let typeInfo = "";
     let direction: "postfix" | "prefix" = "postfix";
@@ -810,10 +883,11 @@ export class Parser {
       return punct + " ";
     });
     const leading = declSpecifier.typeSpecifiers.join(" ");
-    const isFunction = surrounding[0]?.kind === "function";
+    const functionInfo =
+      surrounding[0]?.kind === "function" ? surrounding[0] : null;
     if (leading === "") {
       this.assert(
-        isFunction,
+        functionInfo,
         `Declaration without type-specifier must be function (ctor, dtor or conversion)`,
       );
     }
@@ -825,14 +899,14 @@ export class Parser {
       typeInfo = "const " + typeInfo;
     }
     return {
-      name,
+      idExpr,
       raw: this.lexer.range(startLoc, endLoc),
       typeInfo,
-      isFunction,
+      function: functionInfo,
     };
   }
 
-  private parseDeclaratorImpl(): PartialDeclaratorInfo {
+  private parseDeclaratorImpl(depth: number): PartialDeclaratorInfo {
     const ptrToMemberPrefix = this.tryReadPointerToMemberDeclaratorPrefix();
     if (ptrToMemberPrefix) {
       this.unimplemented("pointer to member declarator");
@@ -849,25 +923,24 @@ export class Parser {
       });
       this.adv();
     }
-    const { name, surrounding } = this.parseDirectDeclarator();
+    const { idExpr, surrounding } = this.parseDirectDeclarator(depth);
     surrounding.push(...prefix.toReversed());
-    return { name, surrounding };
+    return { idExpr, surrounding };
   }
 
-  private parseDirectDeclarator(): PartialDeclaratorInfo {
-    let name: string;
+  private parseDirectDeclarator(depth: number): PartialDeclaratorInfo {
+    let idExpr: IdExpressionInfo;
     const surrounding: DeclaratorSurrounding[] = [];
     if (this.isP("(")) {
       this.adv(); // (
-      const inner = this.parseDeclaratorImpl();
+      const inner = this.parseDeclaratorImpl(depth + 1);
       this.assertP(")");
       this.adv(); // )
-      name = inner.name;
+      idExpr = inner.idExpr;
       surrounding.push(...inner.surrounding);
     } else {
-      const idExpr = this.readIdExpression();
+      idExpr = this.readIdExpression();
       this.tryParseAttribute();
-      name = idExpr.name;
     }
     while (this.isP("[") || this.isP("(")) {
       if (this.isP("(")) {
@@ -875,24 +948,21 @@ export class Parser {
         // not the start of direct-initializer since latter case is rarely used
         // in standard synopsis... and we CANNOT disambiguate them AT ALL, e.g.:
         // `int f(X);` is this function accepting X or variable initialized from X?
-        // TODO parameters
-        this.skipBalancedBrackets("(", ")");
-        const qualifiers: FunctionQualifierInfo = {
-          const: false,
-          volatile: false,
-          ref: null,
-          noexcept: false,
-        };
-        let trailingReturnType = null;
-        // TODO cv-qualifier-seq, ref-qualifier, noexcept-spec, attr
-        // TODO trailing-return-type
-        surrounding.push({
-          kind: "function",
-          params: [],
-          qualifiers,
-          trailingReturnType,
-        });
-        this.unimplemented("function declarator");
+        try {
+          using transaction = this.createRevertTransaction();
+          surrounding.push(this.parseParameterAndQualifiers());
+          transaction.commit();
+        } catch (e) {
+          // Should not fail when depth > 0 i.e. `int (x (HERE));`
+          // which HERE must be parsed parameter list not initializer
+          if (depth > 0) {
+            throw e;
+          }
+          // If we have an error while parsing parameters and qualifiers
+          // this must be a variable declaration with direct initializer,
+          // e.g. `int x(42);`, then we break out declarator parsing.
+          break;
+        }
       } else {
         this.assertP("[");
         this.adv(); // [
@@ -904,7 +974,7 @@ export class Parser {
         surrounding.push({ kind: "array", size });
       }
     }
-    return { name, surrounding };
+    return { idExpr, surrounding };
   }
 
   // ---- Namespace ----
@@ -1154,7 +1224,13 @@ export class Parser {
       previousSpecifiers[0] === "friend" &&
       (this.isP(",") || this.isP("..."))
     ) {
-      this.unimplemented("friend-type-declaration");
+      return {
+        tagKind,
+        useKind: "reference",
+        name: idExpr.name,
+        templateArgs: null,
+        raw: this.lexer.range(startLoc, this.tok.loc),
+      };
     }
 
     if (this.tok.isId("final")) {
@@ -1215,6 +1291,110 @@ export class Parser {
     };
   }
 
+  // ---- Function ----
+
+  private parseParameterAndQualifiers(): FunctionInfo {
+    this.assertP("(");
+    this.adv(); // (
+    const params: ParameterInfo[] = [];
+    while (!this.isP(")")) {
+      // LOOSE PARSE: skip parameters
+      const startLoc = this.tok.loc;
+      this.skipBalancedTokensUntilPunct([",", ")"], true);
+      const endLoc = this.tok.loc;
+      params.push({ raw: this.lexer.range(startLoc, endLoc) });
+      if (this.isP(")")) {
+        break;
+      }
+      this.assertP(",");
+      this.adv();
+    }
+    this.adv(); // )
+    const qualifiers: FunctionQualifierInfo = {
+      const: false,
+      volatile: false,
+      ref: null,
+      noexcept: false,
+    };
+    while (true) {
+      if (this.isP("const")) {
+        qualifiers.const = true;
+        this.adv();
+      } else if (this.isP("volatile")) {
+        qualifiers.volatile = true;
+        this.adv();
+      } else {
+        break;
+      }
+    }
+    if (this.isP("&") || this.isP("&&")) {
+      qualifiers.ref = this.tok.value as "&" | "&&";
+      this.adv();
+    }
+    if (this.isId("noexcept")) {
+      qualifiers.noexcept = true;
+      if (this.isP("(")) {
+        this.adv(); // (
+        const startLoc = this.tok.loc;
+        this.skipBalancedTokensUntilPunct([")"], false);
+        const endLoc = this.tok.loc;
+        qualifiers.noexcept = {
+          raw: this.lexer.range(startLoc, endLoc),
+        };
+        this.adv(); // )
+      }
+    }
+    this.tryParseAttribute();
+    let trailingReturnType = null;
+    if (this.isP("->")) {
+      this.adv(); // ->
+      const startLoc = this.tok.loc;
+      // LOOSE PARSE: skip trailing return type
+      this.skipBalancedTokensUntilPunct([",", "{"], true);
+      const endLoc = this.tok.loc;
+      trailingReturnType = this.lexer.range(startLoc, endLoc);
+    }
+    const vertSpecifiers: VertSpecifierKw[] = [];
+    while (this.isId("final") || this.isId("override")) {
+      vertSpecifiers.push(this.tok.value as VertSpecifierKw);
+      this.adv();
+    }
+    let constraint: ExpressionInfo | null = null;
+    if (vertSpecifiers.length === 0 && this.isId("requires")) {
+      this.adv(); // requires
+      constraint = this.parseConstraintExpression();
+    }
+    const contracts: { raw: string }[] = [];
+    while (this.isId("pre") || this.isId("post")) {
+      contracts.push({ raw: this.parseContractSpecifier() });
+    }
+    return {
+      kind: "function",
+      params,
+      qualifiers,
+      trailingReturnType,
+      vertSpecifiers,
+      constraint,
+      contracts,
+    };
+  }
+
+  private parseContractSpecifier(): string {
+    const startLoc = this.tok.loc;
+    if (this.isId("pre")) {
+      this.adv(); // pre
+      this.tryParseAttribute();
+      this.skipBalancedBrackets("(", ")");
+    } else {
+      this.assertP("post");
+      this.adv(); // post
+      this.tryParseAttribute();
+      this.skipBalancedBrackets("(", ")");
+    }
+    const endLoc = this.tok.loc;
+    return this.lexer.range(startLoc, endLoc);
+  }
+
   // ---- Enum ----
 
   private parseEnum(): void {
@@ -1247,7 +1427,8 @@ export class Parser {
     });
   }
 
-  private parseConstraintExpression(): void {
+  private parseConstraintExpression(): ExpressionInfo {
+    const startLoc = this.tok.loc;
     while (true) {
       if (this.isId("requires")) {
         // LOOSE PARSE: skip requires-expression
@@ -1269,6 +1450,10 @@ export class Parser {
         break;
       }
     }
+    const endLoc = this.tok.loc;
+    return {
+      raw: this.lexer.range(startLoc, endLoc),
+    };
   }
 
   // ---- Helpers ----
@@ -1428,10 +1613,17 @@ export class Parser {
     return `${idExpr.fromGlobal ? "::" : ""}${copy.map((p) => p.name + "::").join("")}${lastPart.componentName}`;
   }
 
-  private isCtorDeclaration({
+  /**
+   * Constructor and deduction guide do not have a type-specifier when
+   * treated as simple-declaration. We must check that current type-specifier
+   * might be part of declarator and not a decl-specifier.
+   */
+  private isCtorOrDeductionGuide({
+    declSpecifiers,
     scopeClassName,
     contextType,
   }: {
+    declSpecifiers: readonly DeclSpecifierKeyword[];
     scopeClassName: string | null;
     contextType: DeclarationContextType;
   }): boolean {
@@ -1444,22 +1636,32 @@ export class Parser {
       return false;
     }
     if (lastPart.templateArgs) {
-      // per C++20, ctor name cannot be template-id
+      // ctor name and deduction guide cannot be template-id
       return false;
     }
 
+    // a inline no-type declaration must be the constructor
     const mayInLineCtor =
       contextType === DeclarationContextType.Class &&
       lastPart.name === scopeClassName;
-    // comparing
+
+    // a out-of-line no-type declaration might be a
+    // out-of-line ctor or a deduction guide
+    // for ctor scenario, comparing
     // `idExpr.parts.at(-2)?.componentName === lastPart.name`
     // is not a good idea since `using B = A;` can make ctor
     // declarations like `B::A()` valid
     const mayOutLineCtor =
       contextType === DeclarationContextType.TopLevel &&
       idExpr.parts.length > 1;
+    // for deduction guide scenario, check current `idExpr` is a simple template-name
+    // and decl-specifier should be empty or a single `explicit`
+    const mayDeductionGuide =
+      idExpr.parts.length === 1 &&
+      (declSpecifiers.length === 0 ||
+        (declSpecifiers.length === 1 && declSpecifiers[0] === "explicit"));
 
-    if (!mayInLineCtor && !mayOutLineCtor) {
+    if (!(mayInLineCtor || mayOutLineCtor || mayDeductionGuide)) {
       return false;
     }
 
