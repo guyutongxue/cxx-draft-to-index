@@ -43,18 +43,13 @@ export interface VariableSymbolEntry extends SymbolEntryBase {
 export interface FunctionSymbolEntry extends SymbolEntryBase {
   kind: "function";
   constexpr?: boolean;
-  returnType: string;
+  operator?: string; // e.g. +, [], ""ms (udl), int (conversion)
+  explicit?: boolean; // ctor and conversion
+  returnType: string; // "" for ctor and conversion
   isTrailingReturnType: boolean;
   parameters: string[]; // raw parameter strings for now
   // void foo() requires <constraints>;
   // signatureRequires?: string | null;
-}
-
-export interface OperatorSymbolEntry extends SymbolEntryBase {
-  kind: "operator";
-  operator: string; // e.g. "+", "[]", "int", etc.
-  explicit?: boolean; // for conversion operators
-  parameters: string[]; // raw parameter strings for now
 }
 
 // using std::foo;
@@ -81,6 +76,7 @@ export interface PartialTemplateSpecializationSymbolEntry extends SymbolEntryBas
 }
 export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
   kind: "fullTemplateSpecialization";
+  operator?: string;
   templateArgs: string[]; // raw template argument strings for now
 }
 
@@ -119,7 +115,6 @@ export interface ClassTemplateSymbolEntry extends Templatize<
   ClassSymbolEntry & { kind: "class" | "struct" }
 > {}
 export interface VariableTemplateSymbolEntry extends Templatize<VariableSymbolEntry> {}
-export interface OperatorTemplateSymbolEntry extends Templatize<OperatorSymbolEntry> {}
 
 export interface ConceptSymbolEntry extends TemplateInfo, SymbolEntryBase {
   kind: "concept";
@@ -133,7 +128,6 @@ export type SymbolEntry =
   | TypeAliasSymbolEntry
   | VariableSymbolEntry
   | FunctionSymbolEntry
-  | OperatorSymbolEntry
   | UsingDeclarationSymbolEntry
   | UsingDirectiveSymbolEntry
   | NamespaceAliasSymbolEntry
@@ -143,7 +137,6 @@ export type SymbolEntry =
   | FunctionTemplateSymbolEntry
   | ClassTemplateSymbolEntry
   | VariableTemplateSymbolEntry
-  | OperatorTemplateSymbolEntry
   | ConceptSymbolEntry
   | DeductionGuideSymbolEntry;
 
