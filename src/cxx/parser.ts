@@ -874,7 +874,7 @@ export class Parser {
         // not the start of direct-initializer since latter case is rarely used
         // in standard synopsis... and we CANNOT disambiguate them AT ALL, e.g.:
         // `int f(X);` is this function accepting X or variable initialized from X?
-        // TODO
+        // TODO parameters
         this.skipBalancedBrackets("(", ")");
         const qualifiers: FunctionQualifierInfo = {
           const: false,
