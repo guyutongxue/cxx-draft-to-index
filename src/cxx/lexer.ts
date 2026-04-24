@@ -2,6 +2,8 @@
 // Token types
 // ============================================================
 
+import { resolveLaTeXInText } from "./latex";
+
 export enum TokenType {
   Identifier,
   Number,
@@ -246,9 +248,11 @@ export class Lexer {
   }
 
   range(startLoc: Location, endLoc: Location): string {
-    return this.src
-      .slice(startLoc.offset, endLoc.offset)
-      .replace(/\/\/.*/gm, "")
-      .trim();
+    return resolveLaTeXInText(
+      this.src
+        .slice(startLoc.offset, endLoc.offset)
+        .replace(/\/\/.*/gm, "")
+        .trim(),
+    );
   }
 }

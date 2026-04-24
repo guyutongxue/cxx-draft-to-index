@@ -691,6 +691,7 @@ export class Parser {
         this.adv();
       } else if (id === "typename") {
         // omit disambiguator `typename`, we don't care
+        this.adv();
       } else if (typeSpecifiers.length === 0) {
         const { isCtor } = readIdExprAsType();
         if (isCtor) {

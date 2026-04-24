@@ -26,12 +26,14 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   [/^\\global\{([^}]+)\}$/g, "$1"],
   [/^\\deflibconcept\{([^}]+)\}$/g, "$1"],
   [/^\\libconcept\{([^}]+)\}$/g, "$1"],
+  [/^\\libmember\{([^}]+)\}\{([^}]+)\}$/g, "$1"],
   [/^\\ref\{([^}]+)\}$/g, ""],
   [/^\\iref\{([^}]+)\}$/g, ""],
 
   // exposition-only symbols, prefix with __
   [/^\\defexposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\defexposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposid\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposidnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
@@ -47,7 +49,7 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
 ];
 
-export function resolveSingleLaTeX(text: string): string {
+function resolveSingleLaTeX(text: string): string {
   if (typeof LATEX_SIMPLE[text] === "string") {
     return LATEX_SIMPLE[text];
   }
@@ -64,4 +66,33 @@ export function resolveSingleLaTeX(text: string): string {
 export function resolveLatex(tok: Token): string {
   if (tok.type !== TokenType.LatexEscape) return tok.value;
   return resolveSingleLaTeX(tok.value.slice(1, -1));
+}
+
+/**
+ * replace @...@ LaTeX mark to codes
+ * @param text
+ * @returns
+ */
+export function resolveLaTeXInText(text: string): string {
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "@") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== "@") {
+        j++;
+      }
+      if (j < text.length) {
+        result += resolveSingleLaTeX(text.slice(i + 1, j));
+        i = j + 1;
+      } else {
+        result += text.slice(i);
+        break;
+      }
+    } else {
+      result += text[i];
+      i++;
+    }
+  }
+  return result;
 }

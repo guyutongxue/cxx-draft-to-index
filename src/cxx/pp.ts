@@ -1,35 +1,6 @@
 import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../types";
-import { resolveSingleLaTeX } from "./latex";
+import { resolveLaTeXInText } from "./latex";
 
-/**
- * Used in extract macro symbols.
- * We should ONLY call this in preprocessing
- * @param text
- * @returns
- */
-function resolveLaTeXInText(text: string): string {
-  let result = "";
-  let i = 0;
-  while (i < text.length) {
-    if (text[i] === "@") {
-      let j = i + 1;
-      while (j < text.length && text[j] !== "@") {
-        j++;
-      }
-      if (j < text.length) {
-        result += resolveSingleLaTeX(text.slice(i + 1, j));
-        i = j + 1;
-      } else {
-        result += text.slice(i);
-        break;
-      }
-    } else {
-      result += text[i];
-      i++;
-    }
-  }
-  return result;
-}
 
 interface PreprocessResult {
   preprocessedCode: string;
