@@ -34,8 +34,8 @@ struct N::S<int> {};
     `;
   const lexer = new Lexer(code);
   const parser = new Parser(lexer, "<input>");
-  parser.parseTopLevel();
-  expect(parser.symbols[1]).toMatchObject({
+  const symbols = parser.parseTopLevel();
+  expect(symbols[1]).toMatchObject({
     kind: "partialTemplateSpecialization",
     name: "N::S",
     templateParams: [""],
@@ -49,8 +49,8 @@ volatile int (*const ptrArr)[42];
     `;
   const lexer = new Lexer(code);
   const parser = new Parser(lexer, "<input>");
-  parser.parseTopLevel();
-  expect(parser.symbols[0]).toMatchObject({
+  const symbols = parser.parseTopLevel();
+  expect(symbols[0]).toMatchObject({
     kind: "variable",
     name: "ptrArr",
     type: "volatile int (*const)[42]",
@@ -65,8 +65,8 @@ namespace std {
 }`;
   const lexer = new Lexer(code);
   const parser = new Parser(lexer, "<input>");
-  parser.parseTopLevel();
-  expect(parser.symbols[0]).toMatchObject({
+  const symbols = parser.parseTopLevel();
+  expect(symbols[0]).toMatchObject({
     kind: "typeAlias",
     name: "__c_atexit_handler",
     languageLinkage: "C",

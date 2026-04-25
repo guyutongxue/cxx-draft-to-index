@@ -1,9 +1,10 @@
 import type {
+  ClassMemberEntry,
+  EnumeratorEntry,
   ExtractKind,
   SymbolEntry,
   SymbolEntryBase,
   SymbolKind,
-  VariableSymbolEntry,
 } from "../types";
 import { resolveLatex } from "./latex";
 import { Lexer, Location, Token, TokenType } from "./lexer";
@@ -11,9 +12,7 @@ import { produce } from "immer";
 
 interface ParserContext {
   readonly linkageStack: readonly string[];
-  // TODO support class/enum scope
   readonly nsStack: readonly string[];
-  readonly symbols: readonly SymbolEntry[];
 }
 
 interface AttributeInfo {
@@ -129,7 +128,11 @@ interface IdExpressionInfo {
 }
 
 type ClassTagKind = "class" | "struct" | "union";
-type ClassSpecifierUseKind = "definition" | "declaration" | "reference";
+type ClassSpecifierUseKind =
+  | "definition"
+  | "declaration"
+  | "reference"
+  | "friendType";
 
 interface BaseSpecifierInfo {
   raw: string;
@@ -145,14 +148,14 @@ interface ClassSpecifierInfo {
   templateArgs: TemplateArgumentInfo[] | null;
   useKind: ClassSpecifierUseKind;
   raw: string;
-  // TODO member
+  members: ClassMemberEntry[] | null;
 }
 
 interface EnumSpecifierInfo {
   scoped: boolean | "class" | "struct";
-  id: IdExpressionInfo;
+  id: IdExpressionInfo | null;
   baseType: string | null;
-  // TODO enumerator
+  enumerators: EnumeratorEntry[] | null;
 }
 
 interface CvQualifierSet {
@@ -245,7 +248,6 @@ export class Parser {
     this.context = {
       linkageStack: [],
       nsStack: [],
-      symbols: [],
     };
   }
 
@@ -445,7 +447,8 @@ export class Parser {
 
   // ---- Top-level ----
 
-  parseTopLevel(): void {
+  parseTopLevel(): SymbolEntry[] {
+    const symbols: SymbolEntry[] = [];
     while (!this.eof()) {
       if (this.tok.type === TokenType.Identifier) {
         switch (this.tok.value) {
@@ -460,18 +463,19 @@ export class Parser {
           }
         }
       }
-      this.parseExternalDeclaration();
+      symbols.push(...this.parseExternalDeclaration());
     }
+    return symbols;
   }
 
   // ---- Declaration ----
 
-  private parseExternalDeclaration(): void {
+  private parseExternalDeclaration(): SymbolEntry[] {
     const startLoc = this.tok.loc;
     this.tryParseAttribute();
     if (this.isP(";")) {
       this.adv();
-      return;
+      return [];
     }
     if (this.isId("extern")) {
       const nextTok = this.nextTok();
@@ -497,7 +501,7 @@ export class Parser {
     startLoc: Location;
     contextType: DeclarationContextType;
     scopeClassName: string | null;
-  }): void {
+  }): SymbolEntry[] {
     // template
     if (this.isId("template") && !this.nextTok().isP("[:")) {
       const nextTok = this.nextTok();
@@ -535,6 +539,7 @@ export class Parser {
       this.skipBalancedBrackets("(", ")");
       this.assertP(";");
       this.adv(); // ;
+      return [];
     }
     return this.parseSimpleDeclarationOrFunctionDefinition({
       startLoc,
@@ -544,7 +549,8 @@ export class Parser {
     });
   }
 
-  private parseLinkage() {
+  private parseLinkage(): SymbolEntry[] {
+    const symbols: SymbolEntry[] = [];
     this.assertId("extern");
     this.adv();
     this.assert(
@@ -558,19 +564,20 @@ export class Parser {
     });
     if (this.isP("{")) {
       while (!this.isP("}")) {
-        this.parseExternalDeclaration();
+        symbols.push(...this.parseExternalDeclaration());
       }
       this.assertP("}");
       this.adv(); // consume }
     } else {
-      this.parseExternalDeclaration();
+      symbols.push(...this.parseExternalDeclaration());
     }
     this.context = produce(this.context, (ctx) => {
       ctx.linkageStack.pop();
     });
+    return symbols;
   }
 
-  private parseExportDeclaration() {
+  private parseExportDeclaration(): SymbolEntry[] {
     this.unimplemented("export declaration");
   }
 
@@ -592,7 +599,8 @@ export class Parser {
     contextType: DeclarationContextType;
     scopeClassName: string | null;
     templateInfo: TemplateInfo | null;
-  }): void {
+  }): SymbolEntry[] {
+    const symbols: SymbolEntry[] = [];
     const declSpecifier = this.parseDeclarationSpecifiers({
       declStartLoc: startLoc,
       templateInfo,
@@ -609,54 +617,101 @@ export class Parser {
       this.assertP(";");
       this.adv(); // consume ;
     }
-    const { classSpecifier } = declSpecifier;
-    if (classSpecifier && classSpecifier.useKind !== "reference") {
+    const { classSpecifier, enumSpecifier } = declSpecifier;
+    if (
+      classSpecifier?.useKind === "declaration" ||
+      classSpecifier?.useKind === "definition"
+    ) {
       if (classSpecifier.tagKind === "union") {
         this.assert(!templateInfo, "union cannot be template");
-        this.emitSymbol("union", {
-          name: classSpecifier.id.name,
-          raw: classSpecifier.raw + ";",
-          base: [],
-        });
+        symbols.push(
+          this.buildSymbol("union", {
+            name: classSpecifier.id.name,
+            raw: classSpecifier.raw + ";",
+            base: [],
+            members: classSpecifier.members,
+          }),
+        );
       } else if (templateInfo) {
         if (templateInfo.fullSpecialization) {
           this.assert(
             classSpecifier.templateArgs,
             "full specialization must have template args",
           );
-          this.emitSymbol("fullTemplateSpecialization", {
-            name: this.nameWithoutTemplateArg(classSpecifier.id),
-            raw: this.lexer.range(startLoc, this.tok.loc),
-            templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
-          });
+          symbols.push(
+            this.buildSymbol("fullTemplateSpecialization", {
+              name: this.nameWithoutTemplateArg(classSpecifier.id),
+              templateKind: "class",
+              raw: this.lexer.range(startLoc, this.tok.loc),
+              templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
+              members: classSpecifier.members,
+            }),
+          );
         } else if (classSpecifier.templateArgs) {
-          this.emitSymbol("partialTemplateSpecialization", {
-            name: this.nameWithoutTemplateArg(classSpecifier.id),
-            raw: this.lexer.range(startLoc, this.tok.loc),
-            templateParams: templateInfo.templateParameters.map((p) => p.raw),
-            templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
-          });
+          symbols.push(
+            this.buildSymbol("partialTemplateSpecialization", {
+              name: this.nameWithoutTemplateArg(classSpecifier.id),
+              templateKind: "class",
+              raw: this.lexer.range(startLoc, this.tok.loc),
+              templateParams: templateInfo.templateParameters.map((p) => p.raw),
+              templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
+              members: classSpecifier.members,
+            }),
+          );
         } else {
-          this.emitSymbol("classTemplate", {
-            name: classSpecifier.id.name,
-            raw: this.lexer.range(startLoc, this.tok.loc),
-            templateParams: templateInfo.templateParameters.map((p) => p.raw),
-            base: classSpecifier.baseSpecifiers.map((b) => b.raw),
-          });
+          if (classSpecifier.id.parts.length !== 1) {
+            console.warn(
+              `(Re-)declaration of a scoped class template is not supported`,
+            );
+          } else {
+            symbols.push(
+              this.buildSymbol("classTemplate", {
+                name: classSpecifier.id.name,
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                templateParams: templateInfo.templateParameters.map(
+                  (p) => p.raw,
+                ),
+                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                members: classSpecifier.members,
+              }),
+            );
+          }
         }
       } else {
-        this.emitSymbol("class", {
-          name: classSpecifier.id.name,
-          raw: classSpecifier.raw + ";",
-          base: classSpecifier.baseSpecifiers.map((b) => b.raw),
-        });
+        if (classSpecifier.id.parts.length !== 1) {
+          console.warn(`(Re-)declaration of a scoped class is not supported`);
+        } else {
+          symbols.push(
+            this.buildSymbol("class", {
+              name: classSpecifier.id.name,
+              raw: classSpecifier.raw + ";",
+              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+              members: classSpecifier.members,
+            }),
+          );
+        }
       }
     }
+    if (classSpecifier?.useKind === "friendType") {
+      this.unimplemented("friend type declaration");
+    }
+    if (enumSpecifier?.id) {
+      symbols.push(
+        this.buildSymbol("enum", {
+          name: enumSpecifier.id.name,
+          raw: this.lexer.range(startLoc, this.tok.loc),
+          scoped: !!enumSpecifier.scoped,
+          enumerators: enumSpecifier.enumerators,
+        }),
+      );
+    }
     if (!declaratorList) {
-      return;
+      return symbols;
     }
     for (const declarator of declaratorList.declarators) {
       const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
+      const idLastPart = declarator.idExpr.parts.at(-1);
+      const partialSpecialization = templateInfo && idLastPart?.templateArgs;
       if (declarator.function) {
         let operator: string | null = null;
         const lastPart = declarator.idExpr.parts.at(-1);
@@ -674,19 +729,24 @@ export class Parser {
           typeof declSpecifier.explicitSpecifier === "boolean"
             ? declSpecifier.explicitSpecifier
             : declSpecifier.explicitSpecifier.raw;
+        const friend = declSpecifier.declSpecifiers.includes("friend");
         if (
           declSpecifier.typeSpecifiers.length === 0 &&
           declarator.function.trailingReturnType
         ) {
           // must be deduction guide e.g. C(T) -> C<T>
-          this.emitSymbol("deductionGuide", {
-            name: declarator.idExpr.name,
-            raw: this.lexer.range(startLoc, this.tok.loc),
-            parameters: declarator.function.params.map((p) => p.raw),
-            targetType: declarator.function.trailingReturnType,
-            templateParams: templateInfo?.templateParameters.map((p) => p.raw),
-            templateRequires: templateInfo?.requiresClause,
-          });
+          symbols.push(
+            this.buildSymbol("deductionGuide", {
+              name: declarator.idExpr.name,
+              raw: this.lexer.range(startLoc, this.tok.loc),
+              parameters: declarator.function.params.map((p) => p.raw),
+              targetType: declarator.function.trailingReturnType,
+              templateParams: templateInfo?.templateParameters.map(
+                (p) => p.raw,
+              ),
+              templateRequires: templateInfo?.requiresClause,
+            }),
+          );
           break;
         }
         if (templateInfo) {
@@ -694,67 +754,138 @@ export class Parser {
             declaratorList.declarators.length === 1,
             "Function template cannot have multiple declarators",
           );
-          if (!templateInfo.fullSpecialization) {
-            this.emitSymbol("functionTemplate", {
+          if (templateInfo.fullSpecialization) {
+            this.assert(
+              idLastPart?.templateArgs,
+              `full template specialization should have template args`,
+            );
+            symbols.push(
+              this.buildSymbol("fullTemplateSpecialization", {
+                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                templateKind: "function",
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                templateArgs: idLastPart.templateArgs.map((a) => a.raw),
+                members: null,
+              }),
+            );
+          } else {
+            if (declarator.idExpr.parts.length !== 1) {
+              console.warn(
+                `(Re-)declaration of a scoped function template is not supported`,
+              );
+              continue;
+            }
+            if (partialSpecialization) {
+              this.die(`Function template cannot be partial specialized`);
+            }
+            symbols.push(
+              this.buildSymbol("functionTemplate", {
+                name: declarator.idExpr.name,
+                operator,
+                parameters: declarator.function.params.map((p) => p.raw),
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                returnType,
+                isTrailingReturnType,
+                constexpr,
+                explicit,
+                friend,
+                templateParams: templateInfo.templateParameters.map(
+                  (p) => p.raw,
+                ),
+                templateRequires: templateInfo.requiresClause,
+                signatureRequires: declarator.function.constraint?.raw || null,
+              }),
+            );
+          }
+          break;
+        } else {
+          if (declarator.idExpr.parts.length !== 1) {
+            console.warn(
+              `(Re-)declaration of a scoped function is not supported`,
+            );
+            continue;
+          }
+          symbols.push(
+            this.buildSymbol("function", {
               name: declarator.idExpr.name,
               operator,
               parameters: declarator.function.params.map((p) => p.raw),
-              raw: this.lexer.range(startLoc, this.tok.loc),
+              raw: declSpecifier.raw + " " + declarator.raw + ";",
               returnType,
               isTrailingReturnType,
               constexpr,
               explicit,
-              templateParams: templateInfo.templateParameters.map((p) => p.raw),
-              templateRequires: templateInfo.requiresClause,
-            });
-          } else {
-            const lastPart = declarator.idExpr.parts.at(-1);
-            this.assert(
-              lastPart?.templateArgs,
-              `full template specialization should have template args`,
-            );
-            this.emitSymbol("fullTemplateSpecialization", {
-              name: declarator.idExpr.name,
-              raw: this.lexer.range(startLoc, this.tok.loc),
-              templateArgs: lastPart.templateArgs.map((a) => a.raw),
-            });
-          }
-          break;
-        } else {
-          this.emitSymbol("function", {
-            name: declarator.idExpr.name,
-            operator,
-            parameters: declarator.function.params.map((p) => p.raw),
-            raw: declSpecifier.raw + " " + declarator.raw + ";",
-            returnType,
-            isTrailingReturnType,
-            constexpr,
-            explicit,
-          });
+              friend,
+              signatureRequires: null,
+            }),
+          );
         }
       } else {
+        const raw = declSpecifier.raw + " " + declarator.raw + ";";
         const entry = {
           name: declarator.idExpr.name,
-          raw: declSpecifier.raw + " " + declarator.raw + ";",
+          raw,
           type: declarator.typeInfo,
           constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
           extern: declSpecifier.declSpecifiers.includes("extern"),
           inline: declSpecifier.declSpecifiers.includes("inline"),
         };
         if (templateInfo) {
-          this.assert(
-            !templateInfo.fullSpecialization,
-            "variable cannot be full specialization",
-          );
-          this.emitSymbol("variableTemplate", {
-            ...entry,
-            templateParams: templateInfo.templateParameters.map((p) => p.raw),
-          });
+          if (templateInfo.fullSpecialization) {
+            this.assert(
+              idLastPart?.templateArgs,
+              `full template specialization should have template args`,
+            );
+            symbols.push(
+              this.buildSymbol("fullTemplateSpecialization", {
+                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                templateKind: "variable",
+                templateArgs: idLastPart?.templateArgs.map((a) => a.raw),
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                members: null,
+              }),
+            );
+          } else if (partialSpecialization) {
+            symbols.push(
+              this.buildSymbol("partialTemplateSpecialization", {
+                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                templateKind: "variable",
+                templateParams: templateInfo.templateParameters.map(
+                  (p) => p.raw,
+                ),
+                templateArgs: partialSpecialization.map((a) => a.raw),
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                members: null,
+              }),
+            );
+          } else {
+            if (declarator.idExpr.parts.length !== 1) {
+              console.warn(
+                `(Re-)declaration of a scoped variable template is not supported`,
+              );
+              continue;
+            }
+            symbols.push(
+              this.buildSymbol("variableTemplate", {
+                ...entry,
+                templateParams: templateInfo.templateParameters.map(
+                  (p) => p.raw,
+                ),
+              }),
+            );
+          }
         } else {
-          this.emitSymbol("variable", entry);
+          if (declarator.idExpr.parts.length !== 1) {
+            console.warn(
+              `(Re-)declaration of a scoped variable is not supported`,
+            );
+            continue;
+          }
+          symbols.push(this.buildSymbol("variable", entry));
         }
       }
     }
+    return symbols;
   }
 
   private parseDeclarationSpecifiers({
@@ -780,19 +911,19 @@ export class Parser {
     const declSpecifiers: DeclSpecifierKeyword[] = [];
     let explicit: boolean | ExpressionInfo = false;
 
-    const readIdExprAsType = (): { isCtor: boolean } => {
+    const readIdExprAsType = (): { notAType: boolean } => {
       // We hits an id-expression while parsing decl-specifier.
       // It might be the declarator of ctor declaration which is not a type-specifier
-      const isCtor = this.isCtorOrDeductionGuide({
+      const notAType = this.isTypeSpecifierDisallowed({
         declSpecifiers: [...declSpecifiers],
         scopeClassName,
         contextType,
       });
-      if (!isCtor) {
+      if (!notAType) {
         const idExpression = this.readIdExpression();
         typeSpecifiers.push(idExpression.name);
       }
-      return { isCtor };
+      return { notAType };
     };
 
     while (true) {
@@ -809,8 +940,8 @@ export class Parser {
           this.isP("template") || // template [: M :]<T>::A
           this.tok.type === TokenType.LatexEscape)
       ) {
-        const { isCtor } = readIdExprAsType();
-        if (isCtor) {
+        const { notAType } = readIdExprAsType();
+        if (notAType) {
           break;
         }
       }
@@ -851,7 +982,6 @@ export class Parser {
         classSpecifier = this.parseClassSpecifier({
           previousSpecifiers: [...declSpecifiers],
           declStartLoc,
-          templateInfo,
           contextType,
         });
       } else if (id === "enum") {
@@ -863,8 +993,8 @@ export class Parser {
         // omit disambiguator `typename`, we don't care
         this.adv();
       } else if (typeSpecifiers.length === 0) {
-        const { isCtor } = readIdExprAsType();
-        if (isCtor) {
+        const { notAType } = readIdExprAsType();
+        if (notAType) {
           break;
         }
       } else {
@@ -878,7 +1008,7 @@ export class Parser {
       ...(cvQualifiers.volatile ? ["volatile"] : []),
       ...typeSpecifiers,
       ...(classSpecifier ? [classSpecifier.id.name] : []),
-      ...(enumSpecifier ? [enumSpecifier.id.name] : []),
+      ...(enumSpecifier?.id ? [enumSpecifier.id.name] : []),
     ].join(" ");
     return {
       typeSpecifiers,
@@ -1130,7 +1260,8 @@ export class Parser {
 
   // ---- Namespace ----
 
-  private parseNamespace({ inline }: { inline: boolean }) {
+  private parseNamespace({ inline }: { inline: boolean }): SymbolEntry[] {
+    const symbols: SymbolEntry[] = [];
     if (inline) {
       this.assertId("inline");
       this.adv(); // "inline"
@@ -1163,12 +1294,14 @@ export class Parser {
       const targetExpr = this.readIdExpression();
       this.assertP(";");
       this.adv(); // ;
-      this.emitSymbol("namespaceAlias", {
-        name,
-        targetNamespace: targetExpr.name,
-        raw: this.lexer.range(startLoc, this.tok.loc),
-      });
-      return;
+      symbols.push(
+        this.buildSymbol("namespaceAlias", {
+          name,
+          targetNamespace: targetExpr.name,
+          raw: this.lexer.range(startLoc, this.tok.loc),
+        }),
+      );
+      return symbols;
     }
 
     // namespace { ... }
@@ -1184,12 +1317,13 @@ export class Parser {
     });
 
     while (!this.isP("}")) {
-      this.parseExternalDeclaration();
+      symbols.push(...this.parseExternalDeclaration());
     }
     this.context = produce(this.context, (ctx) => {
       ctx.nsStack.pop();
     });
     this.adv(); // }
+    return symbols;
   }
 
   // ---- Using ----
@@ -1200,7 +1334,7 @@ export class Parser {
   }: {
     templateInfo: TemplateInfo | null;
     startLoc: Location;
-  }): void {
+  }): SymbolEntry[] {
     this.assertId("using");
     this.adv(); // "using"
 
@@ -1213,26 +1347,33 @@ export class Parser {
     return this.parseUsingDeclaration({ templateInfo, startLoc });
   }
 
-  private parseUsingDirective({ startLoc }: { startLoc: Location }): void {
+  private parseUsingDirective({
+    startLoc,
+  }: {
+    startLoc: Location;
+  }): SymbolEntry[] {
     this.assertId("namespace");
     this.adv(); // namespace
     const idExpr = this.readIdExpression();
     this.assertP(";");
     this.adv();
-    this.emitSymbol("usingDirective", {
-      name: "", // using-directive does not introduce a name
-      targetNamespace: idExpr.name,
-      raw: this.lexer.range(startLoc, this.tok.loc),
-    });
+    return [
+      this.buildSymbol("usingDirective", {
+        name: "", // using-directive does not introduce a name
+        targetNamespace: idExpr.name,
+        raw: this.lexer.range(startLoc, this.tok.loc),
+      }),
+    ];
   }
 
-  private parseUsingEnumDeclaration(): void {
+  private parseUsingEnumDeclaration(): SymbolEntry[] {
     this.assertId("enum");
     this.adv(); // enum
     this.readIdExpression();
     this.assertP(";");
     this.adv();
     // TODO should we emit symbol for using enum declaration?
+    return [];
   }
 
   private parseUsingDeclaration({
@@ -1241,7 +1382,7 @@ export class Parser {
   }: {
     templateInfo: TemplateInfo | null;
     startLoc: Location;
-  }) {
+  }): SymbolEntry[] {
     // using typename X::Y;
     if (this.isId("typename")) {
       this.adv();
@@ -1265,30 +1406,36 @@ export class Parser {
       this.skipBalancedTokensUntilPunct([";"], true);
       this.adv();
       if (templateInfo) {
-        this.emitSymbol("typeAliasTemplate", {
-          name,
-          raw: this.lexer.range(startLoc, this.tok.loc),
-          syntax: "using",
-          templateParams: templateInfo.templateParameters.map((p) => p.raw),
-        });
+        return [
+          this.buildSymbol("typeAliasTemplate", {
+            name,
+            raw: this.lexer.range(startLoc, this.tok.loc),
+            syntax: "using",
+            templateParams: templateInfo.templateParameters.map((p) => p.raw),
+          }),
+        ];
       } else {
-        this.emitSymbol("typeAlias", {
-          name,
-          raw: this.lexer.range(startLoc, this.tok.loc),
-          syntax: "using",
-        });
+        return [
+          this.buildSymbol("typeAlias", {
+            name,
+            raw: this.lexer.range(startLoc, this.tok.loc),
+            syntax: "using",
+          }),
+        ];
       }
-      return;
     }
+    const symbols: SymbolEntry[] = [];
 
     // using X::Y, Z::W;
     while (true) {
       const { name, parts } = idExpr;
-      this.emitSymbol("usingDeclaration", {
-        name: parts.at(-1)!.name,
-        raw: this.lexer.range(startLoc, this.tok.loc) + ";",
-        target: name,
-      });
+      symbols.push(
+        this.buildSymbol("usingDeclaration", {
+          name: parts.at(-1)!.name,
+          raw: this.lexer.range(startLoc, this.tok.loc) + ";",
+          target: name,
+        }),
+      );
       if (this.isP(";")) {
         this.adv();
         break;
@@ -1297,6 +1444,7 @@ export class Parser {
       this.adv();
       idExpr = this.readIdExpression();
     }
+    return symbols;
   }
 
   // ---- Template ----
@@ -1309,30 +1457,30 @@ export class Parser {
     startLoc: Location;
     contextType: DeclarationContextType;
     scopeClassName: string | null;
-  }): void {
+  }): SymbolEntry[] {
     const templateParameters = [];
     let requiresClause: string | null = null;
     this.assertId("template");
-    // there might be multiple template header...
-    // we just keep the code structure but do not touch it now
-    //   template<typename T>
-    //     template<typename U>
-    //       class A<T>::B { ... };
     let fullSpecialization = false;
-    while (this.isId("template")) {
-      this.adv(); // template
-      const params = this.parseTemplateParams();
-      if (params.length === 0) {
-        fullSpecialization = true;
-      }
-      templateParameters.push(...params);
-      if (this.isId("requires")) {
-        this.adv(); // requires
-        const startLoc = this.tok.loc;
-        this.parseConstraintExpression();
-        const endLoc = this.tok.loc;
-        requiresClause = this.lexer.range(startLoc, endLoc);
-      }
+    this.adv(); // template
+    const params = this.parseTemplateParams();
+    if (params.length === 0) {
+      fullSpecialization = true;
+    }
+    templateParameters.push(...params);
+    if (this.isId("requires")) {
+      this.adv(); // requires
+      const startLoc = this.tok.loc;
+      this.parseConstraintExpression();
+      const endLoc = this.tok.loc;
+      requiresClause = this.lexer.range(startLoc, endLoc);
+    }
+    // there might be multiple template header... unsupported, sadly
+    //   template <typename T>
+    //     template <typename U>
+    //       class A<T>::B { ... };
+    if (this.isId("template")) {
+      this.unimplemented("multiple template header");
     }
     const templateInfo: TemplateInfo = {
       fullSpecialization: fullSpecialization,
@@ -1340,7 +1488,7 @@ export class Parser {
       requiresClause,
     };
     if (this.isId("concept")) {
-      return this.parseConcept({ templateInfo, startLoc });
+      return this.parseConcept({ templateInfo, startLoc, contextType });
     }
     return this.parseDeclarationAfterTemplate({
       startLoc,
@@ -1360,14 +1508,17 @@ export class Parser {
     contextType: DeclarationContextType;
     templateInfo: TemplateInfo;
     scopeClassName: string | null;
-  }): void {
+  }): SymbolEntry[] {
     // TODO if we are in member context, dispatch to a member declaration
 
     this.tryParseAttribute();
 
     if (this.isId("using")) {
       // template <...> using T = ...;
-      return this.parseUsingDirectiveOrDeclaration({ startLoc, templateInfo });
+      return this.parseUsingDirectiveOrDeclaration({
+        startLoc,
+        templateInfo,
+      });
     }
 
     return this.parseSimpleDeclarationOrFunctionDefinition({
@@ -1382,12 +1533,10 @@ export class Parser {
 
   private parseClassSpecifier({
     previousSpecifiers,
-    templateInfo,
     contextType,
   }: {
     previousSpecifiers: readonly DeclSpecifierKeyword[];
     declStartLoc: Location;
-    templateInfo: TemplateInfo | null;
     contextType: DeclarationContextType;
   }): ClassSpecifierInfo {
     const startLoc = this.tok.loc;
@@ -1398,6 +1547,7 @@ export class Parser {
     this.tryParseAttribute();
     const idExpr = this.readIdExpression();
 
+    // TODO
     // friend class A, class B;
     // friend class Ts...;
     if (
@@ -1406,11 +1556,12 @@ export class Parser {
     ) {
       return {
         tagKind,
-        useKind: "reference",
+        useKind: "friendType",
         id: idExpr,
         templateArgs: null,
         raw: this.lexer.range(startLoc, this.tok.loc),
         baseSpecifiers: [],
+        members: null,
       };
     }
 
@@ -1467,14 +1618,19 @@ export class Parser {
     const templateArgs = idExpr.parts.at(-1)?.templateArgs ?? null;
     if (mayDeclare && !templateArgs) {
       this.assert(
-        idExpr.parts.length === 1 &&
-          idExpr.parts[0].kind === IdPartKind.Identifier,
+        idExpr.parts.at(-1)?.kind === IdPartKind.Identifier,
         "Name of class declaration or definition should be a simple identifier",
       );
     }
 
+    let members: ClassMemberEntry[] | null = null;
     if (mayDeclare && this.tok.isP("{")) {
-      this.skipBalancedBrackets("{", "}");
+      const componentName = idExpr.parts.at(-1)?.value;
+      this.assert(
+        componentName,
+        `Class should have a name to declare its members`,
+      );
+      members = this.parseMemberSpecification(componentName);
       useKind = "definition";
     }
     if (mayDeclare && this.tok.isP(";")) {
@@ -1490,7 +1646,57 @@ export class Parser {
       useKind,
       baseSpecifiers,
       raw,
+      members,
     };
+  }
+
+  /**
+   * Parse
+   */
+  private parseMemberSpecification(
+    scopeClassName: string,
+  ): ClassMemberEntry[] | null {
+    this.assertP("{");
+    this.adv(); // {
+    if (this.tryReadUnspecifiedMemberOrEnumerator()) {
+      this.assertP("}");
+      this.adv(); // }
+      return null;
+    }
+    const members: ClassMemberEntry[] = [];
+    while (!this.isP("}")) {
+      if (
+        this.tok.type === TokenType.Identifier &&
+        ["public", "protected", "private"].includes(this.tok.value) &&
+        this.nextTok().isP(":")
+      ) {
+        this.adv(); // access-specifier
+        this.adv(); // :
+        continue;
+      }
+      const startLoc = this.tok.loc;
+      this.tryParseAttribute();
+      const symbols = this.parseDeclaration({
+        startLoc,
+        contextType: DeclarationContextType.Class,
+        scopeClassName,
+      });
+      for (const sym of symbols) {
+        switch (sym.kind) {
+          case "macro":
+          case "functionLikeMacro":
+          case "usingDirective":
+          case "namespaceAlias":
+          case "concept":
+            this.die(`Symbol of kind ${sym.kind} cannot be a class member`);
+          default:
+            members.push(sym);
+        }
+      }
+    }
+    this.assertP("}");
+    this.adv(); // }
+    return members;
   }
 
   // ---- Function ----
@@ -1519,10 +1725,10 @@ export class Parser {
       noexcept: false,
     };
     while (true) {
-      if (this.isP("const")) {
+      if (this.isId("const")) {
         qualifiers.const = true;
         this.adv();
-      } else if (this.isP("volatile")) {
+      } else if (this.isId("volatile")) {
         qualifiers.volatile = true;
         this.adv();
       } else {
@@ -1626,12 +1832,13 @@ export class Parser {
       this.adv(); // class|struct
     }
     this.tryParseAttribute();
+    let enumerators: EnumeratorEntry[] | null = null;
     // anonymous enum: `enum { ... };`
     // optionally with base type: `enum : int { ... };`
     if (!scoped) {
       if (this.isP(":")) {
         baseType = this.parseEnumBase();
-        this.skipBalancedBrackets("{", "}");
+        enumerators = this.parseEnumeratorList();
       }
     }
     const id = this.readIdExpression();
@@ -1639,13 +1846,48 @@ export class Parser {
       baseType = this.parseEnumBase();
     }
     if (this.isP("{")) {
-      this.skipBalancedBrackets("{", "}");
+      enumerators = this.parseEnumeratorList();
     }
     return {
       id,
       scoped,
       baseType,
+      enumerators,
     };
+  }
+
+  private parseEnumeratorList(): EnumeratorEntry[] | null {
+    this.assertP("{");
+    this.adv(); // {
+    if (this.tryReadUnspecifiedMemberOrEnumerator()) {
+      this.assertP("}");
+      this.adv(); // }
+      return null;
+    }
+    const enumerators: EnumeratorEntry[] = [];
+    while (!this.isP("}")) {
+      if (this.isP(",")) {
+        this.adv();
+        continue;
+      }
+      const startLoc = this.tok.loc;
+      const name = this.readIdent();
+      let value: string | null = null;
+      if (this.isP("=")) {
+        this.adv();
+        const valueStart = this.tok.loc;
+        this.skipBalancedTokensUntilPunct([",", "}"], true);
+        value = this.lexer.range(valueStart, this.tok.loc);
+      }
+      const raw = this.lexer.range(startLoc, this.tok.loc);
+      enumerators.push({ name, raw, value });
+      if (this.isP(",")) {
+        this.adv();
+      }
+    }
+    this.assertP("}");
+    this.adv(); // }
+    return enumerators;
   }
 
   // ---- Concept ----
@@ -1653,10 +1895,12 @@ export class Parser {
   private parseConcept({
     startLoc,
     templateInfo,
+    contextType,
   }: {
     startLoc: Location;
     templateInfo: TemplateInfo;
-  }): void {
+    contextType: DeclarationContextType;
+  }): SymbolEntry[] {
     this.assertId("concept");
     this.adv(); // concept
     const name = this.readIdent();
@@ -1671,11 +1915,13 @@ export class Parser {
     this.skipBalancedTokensUntilPunct([";"], true);
     this.assertP(";");
     this.adv(); // ;
-    this.emitSymbol("concept", {
-      name,
-      raw: this.lexer.range(startLoc, this.tok.loc),
-      templateParams: templateInfo.templateParameters.map((p) => p.raw),
-    });
+    return [
+      this.buildSymbol("concept", {
+        name,
+        raw: this.lexer.range(startLoc, this.tok.loc),
+        templateParams: templateInfo.templateParameters.map((p) => p.raw),
+      }),
+    ];
   }
 
   private parseConstraintExpression(): ExpressionInfo {
@@ -1817,8 +2063,15 @@ export class Parser {
       kind = IdPartKind.Computed;
     } else if (this.isP("~")) {
       name += "~";
+      this.adv(); // ~
+      this.assert(
+        this.isIdentifierOrLaTeX(),
+        "Expected identifier after ~ in destructor name",
+      );
+      value = this.resolved(this.tok);
+      name += value;
       this.adv();
-      this.unimplemented("destructor name parsing");
+      kind = IdPartKind.Destructor;
     } else if (this.isId("operator")) {
       name += "operator";
       this.adv();
@@ -1832,6 +2085,14 @@ export class Parser {
             value += nextTok.value;
             this.adv();
           }
+        } else if (this.tok.value === "(") {
+          this.adv();
+          this.assertP(")");
+          value += ")";
+        } else if (this.tok.value === "[") {
+          this.adv();
+          this.assertP("]");
+          value += "]";
         }
         name += value;
         this.adv();
@@ -1858,7 +2119,7 @@ export class Parser {
       } else {
         kind = IdPartKind.Conversion;
         value = this.readIdExpression().name;
-        name += value;
+        name += " " + value;
       }
     } else if (this.isIdentifierOrLaTeX()) {
       value = this.resolved(this.tok);
@@ -1888,6 +2149,30 @@ export class Parser {
     return { kind, name, value, templateArgs };
   }
 
+  /**
+   * Reads @\unspec@, @\seebelow@ placeholder
+   * from a member-specification or enumerator-list
+   * True if read successfully, false if not an unspecified member
+   */
+  private tryReadUnspecifiedMemberOrEnumerator(): boolean {
+    if (this.tok.type !== TokenType.LatexEscape) {
+      return false;
+    }
+    using transaction = this.createRevertTransaction();
+    if (!["@\\unspec@", "@\\seebelow@"].includes(this.tok.value)) {
+      return false;
+    }
+    this.adv();
+    if (this.isP(";")) {
+      this.adv();
+    }
+    if (this.isP("}")) {
+      transaction.commit();
+      return true;
+    }
+    return false;
+  }
+
   /** Used for specialization declarations */
   private nameWithoutTemplateArg(idExpr: IdExpressionInfo): string {
     const copy = [...idExpr.parts];
@@ -1900,11 +2185,11 @@ export class Parser {
   }
 
   /**
-   * Constructor and deduction guide do not have a type-specifier when
-   * treated as simple-declaration. We must check that current type-specifier
-   * might be part of declarator and not a decl-specifier.
+   * Constructor, deduction guide and conversion function do not have a type-specifier
+   * when treated as simple-declaration. We must check that current type-specifier might
+   * be part of declarator and not a decl-specifier.
    */
-  private isCtorOrDeductionGuide({
+  private isTypeSpecifierDisallowed({
     declSpecifiers,
     scopeClassName,
     contextType,
@@ -1917,8 +2202,12 @@ export class Parser {
     const idExpr = this.readIdExpression();
     const lastPart = idExpr.parts.at(-1);
     this.assert(lastPart, "id-expression should have at least one part");
+    if (lastPart.kind === IdPartKind.Conversion) {
+      // conversion function cannot have decl-specifier
+      return true;
+    }
     if (lastPart.kind !== IdPartKind.Identifier) {
-      // dtor
+      // dtor or operator/udl
       return false;
     }
     if (lastPart.templateArgs) {
@@ -2016,13 +2305,19 @@ export class Parser {
     ) {
       return true;
     }
-    if (this.isP(")")) {
-      // work on more...
-      const nextTok = this.nextTok();
-      if (nextTok.isP("->") || nextTok.isP(":")) {
-        // trailing return type or ctor initializer list, must be a ctor declaration
-        return true;
-      }
+    this.skipBalancedTokensUntilPunct([")"], false);
+    this.adv(); // )
+    // work on more...
+    if (this.tok.isP("->") || this.tok.isP(":")) {
+      // trailing return type or ctor initializer list, must be a ctor declaration
+      return true;
+    }
+    if (
+      this.tok.type === TokenType.Identifier &&
+      ["noexcept", "requires", "pre", "post"].includes(this.tok.value)
+    ) {
+      // exception-specifier, constraint or contract, must be a ctor declaration
+      return true;
     }
     this.die(
       `Disambiguate failure: cannot determine whether current declaration is a constructor`,
@@ -2051,14 +2346,14 @@ export class Parser {
     })();
   }
 
-  private emitSymbol<Kind extends SymbolKind>(
+  private buildSymbol<Kind extends SymbolKind>(
     kind: Kind,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
       Exclude<keyof SymbolEntryBase, "raw" | "name"> | "kind"
     >,
-  ): void {
-    const symbol = {
+  ): SymbolEntry {
+    return {
       kind,
       ...info,
       header: this.filename,
@@ -2066,12 +2361,5 @@ export class Parser {
       // TODO inlineUnspecifiedNamespace
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as SymbolEntry;
-    this.context = produce(this.context, (ctx) => {
-      ctx.symbols.push(symbol);
-    });
-  }
-
-  get symbols() {
-    return this.context.symbols;
   }
 }

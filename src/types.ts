@@ -20,12 +20,20 @@ export interface FunctionLikeMacroSymbolEntry extends SymbolEntryBase {
 export interface ClassSymbolEntry extends SymbolEntryBase {
   kind: "class" | "struct" | "union";
   base: string[]; // raw base specifiers for now, [] for union
+  members: ClassMemberEntry[] | null;
+}
+
+export interface EnumeratorEntry {
+  name: string;
+  raw: string;
+  value: string | null;
 }
 
 export interface EnumSymbolEntry extends SymbolEntryBase {
   kind: "enum";
   // enum class
   scoped: boolean;
+  enumerators: EnumeratorEntry[] | null;
 }
 
 export interface TypeAliasSymbolEntry extends SymbolEntryBase {
@@ -46,11 +54,16 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
   constexpr: boolean;
   operator: string | null; // e.g. +, [], ""ms (udl), int (conversion)
   explicit: boolean | string; // ctor and conversion
+  friend: boolean;
   returnType: string; // "" for ctor and conversion
   isTrailingReturnType: boolean;
   parameters: string[]; // raw parameter strings for now
   // void foo() requires <constraints>;
-  // signatureRequires?: string | null;
+  signatureRequires: string | null;
+}
+
+export interface FriendTypeSymbolEntry extends SymbolEntryBase {
+  kind: "friendType";
 }
 
 // using std::foo;
@@ -73,12 +86,15 @@ export interface NamespaceAliasSymbolEntry extends SymbolEntryBase {
 
 export interface PartialTemplateSpecializationSymbolEntry extends SymbolEntryBase, TemplateInfo {
   kind: "partialTemplateSpecialization";
+  templateKind: "class" | "variable";
   templateArgs: string[]; // raw template argument strings for now
+  members: ClassMemberEntry[] | null;
 }
 export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
   kind: "fullTemplateSpecialization";
-  operator?: string;
+  templateKind: "class" | "function" | "variable";
   templateArgs: string[]; // raw template argument strings for now
+  members: ClassMemberEntry[] | null;
 }
 
 export interface DeductionGuideSymbolEntry
@@ -128,6 +144,7 @@ export type SymbolEntry =
   | TypeAliasSymbolEntry
   | VariableSymbolEntry
   | FunctionSymbolEntry
+  | FriendTypeSymbolEntry
   | UsingDeclarationSymbolEntry
   | UsingDirectiveSymbolEntry
   | NamespaceAliasSymbolEntry
@@ -139,6 +156,15 @@ export type SymbolEntry =
   | VariableTemplateSymbolEntry
   | ConceptSymbolEntry
   | DeductionGuideSymbolEntry;
+
+export type ClassMemberEntry = Exclude<
+  SymbolEntry,
+  | MacroSymbolEntry
+  | FunctionLikeMacroSymbolEntry
+  | UsingDirectiveSymbolEntry
+  | NamespaceAliasSymbolEntry
+  | ConceptSymbolEntry
+>;
 
 export type SymbolKind = SymbolEntry["kind"];
 

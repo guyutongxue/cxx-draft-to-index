@@ -8,8 +8,8 @@ export function parseCodeblock(code: string, header: string): SymbolEntry[] {
 
   const lexer = new Lexer(preprocessedCode);
   const parser = new Parser(lexer, header);
-  parser.parseTopLevel();
+  const symbols = parser.parseTopLevel();
   
   // Merge macro symbols at the beginning
-  return [...macroSymbols, ...parser.symbols];
+  return [...macroSymbols, ...symbols];
 }

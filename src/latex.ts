@@ -30,9 +30,9 @@ const PATCHES = {
   "numerics.tex": [
     [
       `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...)>,`,
-      `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...),`
-    ]
-  ]
+      `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...),`,
+    ],
+  ],
 } as Record<string, [string, string][]>;
 
 function applyPatches(fileName: string, content: string): string {
@@ -80,19 +80,20 @@ export function extractHeaderSynopses(
   texFiles: Map<string, string>,
 ): HeaderSynopsis[] {
   const results: HeaderSynopsis[] = [];
-  const seen = new Set<string>();
 
   for (const [fileName, content] of texFiles) {
-    const synopses = extractFromSingleFile(fileName, content);
-    for (const syn of synopses) {
-      if (!seen.has(syn.header)) {
-        seen.add(syn.header);
-        results.push(syn);
-      }
-    }
+    results.push(...extractFromSingleFile(fileName, content));
   }
 
   return results;
+}
+
+function isClassDefinitionCodeblock(code: string): boolean {
+  const hasStdNamespace =
+    /\bnamespace\s+std(?:::[A-Za-z_][A-Za-z0-9_:]*)?\s*\{/.test(code);
+  const hasClassLikeDefinition =
+    /\b(class|struct|union|enum)\b[\s\S]*\{/.test(code) && /\};/.test(code);
+  return hasStdNamespace && hasClassLikeDefinition;
 }
 
 function extractFromSingleFile(
@@ -103,67 +104,74 @@ function extractFromSingleFile(
   const lines = content.split("\n");
 
   for (let i = 0; i < lines.length; i++) {
-    const headerName = findHeaderMarker(lines, i);
-    if (!headerName) continue;
-
-    const codeStart = findNextCodeblock(lines, i + 1);
-    if (codeStart === null) continue;
-
-    const codeEnd = findCodeblockEnd(lines, codeStart);
-    if (codeEnd === null) continue;
-
-    const codeLines = lines.slice(codeStart + 1, codeEnd);
-    results.push({
-      header: headerName,
-      code: codeLines.join("\n"),
-      sourceFile: fileName,
-    });
+    const headerName = isHeaderMarker(lines, i);
+    if (!headerName) {
+      continue;
+    }
+    let hasSynopsis = false;
+    while (true) {
+      const [code, nextLine] = findNextCodeblockInThisHeader(
+        fileName,
+        lines,
+        i + 1,
+      );
+      i = nextLine;
+      if (code === null) {
+        break;
+      }
+      if (hasSynopsis && !isClassDefinitionCodeblock(code)) {
+        continue;
+      }
+      hasSynopsis = true;
+      results.push({
+        header: headerName,
+        code,
+        sourceFile: fileName,
+      });
+    }
   }
 
   return results;
 }
 
-function findHeaderMarker(lines: string[], lineIdx: number): string | null {
+function isHeaderMarker(lines: string[], lineIdx: number): string | null {
   const line = lines[lineIdx];
 
   const indexHeaderMatch = line.match(/\\indexheader\{([^}]+)\}/);
   if (indexHeaderMatch) return indexHeaderMatch[1];
 
-  // e.g.
-  // \rSec2[array.syn]{Header \tcode{<array>} synopsis}
-  const sectionMatch = line.match(
-    /\\rSec\d\[(\w+(?:\.\w+)*)\]\{.*\\tcode\{<(\w+(?:\.\w+)*)>\}\s*synopsis\}/,
-  );
-  if (sectionMatch) return sectionMatch[2];
-
   return null;
 }
 
-function findNextCodeblock(lines: string[], startFrom: number): number | null {
+function findNextCodeblockInThisHeader(
+  fileName: string,
+  lines: string[],
+  startFrom: number,
+): [content: string | null, endIdx: number] {
+  let startLine: number | null = null;
   for (let i = startFrom; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (
-      trimmed.startsWith("\\begin{codeblock}") ||
-      trimmed.startsWith("\\begin{codeblocktu}")
-    ) {
-      return i;
+    if (isHeaderMarker(lines, i)) {
+      if (startLine) {
+        throw new Error(`Unclosed codeblock starting at ${fileName}:${i + 1}`);
+      }
+      return [null, i];
     }
-    if (trimmed.startsWith("\\rSec") || trimmed.startsWith("\\indexheader")) {
-      return null;
+    if (startLine === null) {
+      if (
+        trimmed.startsWith("\\begin{codeblock}") ||
+        trimmed.startsWith("\\begin{codeblocktu}")
+      ) {
+        startLine = i;
+      }
+    } else {
+      if (
+        trimmed.startsWith("\\end{codeblock}") ||
+        trimmed.startsWith("\\end{codeblocktu}")
+      ) {
+        return [lines.slice(startLine + 1, i).join("\n"), i];
+      }
     }
   }
-  return null;
-}
-
-function findCodeblockEnd(lines: string[], codeStart: number): number | null {
-  for (let i = codeStart + 1; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (
-      trimmed.startsWith("\\end{codeblock}") ||
-      trimmed.startsWith("\\end{codeblocktu}")
-    ) {
-      return i;
-    }
-  }
-  return null;
+  return [null, lines.length - 1];
 }

@@ -1,6 +1,7 @@
 import type { IndexOutput, HeaderIndex, SymbolEntry } from "./types";
 import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
 import { parseCodeblock } from "./cxx";
+import { mergeSymbols } from "./merge";
 
 const OUTPUT_FILE = "dist/std-index.json";
 
@@ -29,10 +30,15 @@ async function main() {
     console.log(`  -> ${symbols.length} symbols`);
   }
 
+  const mergedHeaders: HeaderIndex[] = headers.map((h) => ({
+    header: h.header,
+    symbols: mergeSymbols(h.symbols),
+  }));
+
   const output: IndexOutput = {
     version: "1.0.0",
     generated_at: new Date().toISOString(),
-    headers,
+    headers: mergedHeaders,
   };
 
   const outputPath = import.meta.dir
@@ -40,9 +46,9 @@ async function main() {
     : Bun.file(OUTPUT_FILE);
 
   await Bun.write(outputPath, JSON.stringify(output, null, 2));
-  const totalSymbols = headers.reduce((sum, h) => sum + h.symbols.length, 0);
+  const totalSymbols = mergedHeaders.reduce((sum, h) => sum + h.symbols.length, 0);
   console.log(
-    `\nDone! Wrote ${totalSymbols} symbols across ${headers.length} headers to ${OUTPUT_FILE}`,
+    `\nDone! Wrote ${totalSymbols} symbols across ${mergedHeaders.length} headers to ${OUTPUT_FILE}`,
   );
 }
 

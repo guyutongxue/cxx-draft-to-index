@@ -27,6 +27,7 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   [/^\\deflibconcept\{([^}]+)\}$/g, "$1"],
   [/^\\libconcept\{([^}]+)\}$/g, "$1"],
   [/^\\libmember\{([^}]+)\}\{([^}]+)\}$/g, "$1"],
+  [/^\\libspec\{([^}]+)\}\{([^}]+)\}$/g, "$1"],
   [/^\\ref\{([^}]+)\}$/g, ""],
   [/^\\iref\{([^}]+)\}$/g, ""],
 
