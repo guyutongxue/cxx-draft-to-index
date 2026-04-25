@@ -52,7 +52,7 @@ export class Token implements IToken {
 // Lexer
 // ============================================================
 
-const PUNCT_CHARS = new Set("{}()[]<>,;:=*%+!~^&.|/?".split(""));
+const PUNCT_CHARS = new Set("{}()[]<>;:?.~!+-*/%^&|=,".split(""));
 
 export class Lexer {
   private readonly src: string;
@@ -208,7 +208,36 @@ export class Lexer {
       return new Token({ type: TokenType.Identifier, value, loc });
     }
 
-    for (const value of ["...", "->", "::", "[:", ":]", "^^", "&&"]) {
+    // We omit >> intentionally since it's commonly used as adjacent
+    // enclosing template param/args. The parsing of `operator>>` and
+    // `operator>>=` is special-cased in the parser.
+    for (const value of [
+      "...",
+      "<=>",
+      "<<=",
+      "->",
+      "::",
+      "[:",
+      ":]",
+      "^^",
+      "&&",
+      "+=",
+      "-=",
+      "*=",
+      "/=",
+      "%=",
+      "&=",
+      "|=",
+      "^=",
+      "==",
+      "!=",
+      "<=",
+      ">=",
+      "||",
+      "<<",
+      "++",
+      "--",
+    ]) {
       if (this.getN(value.length) === value) {
         for (let i = 0; i < value.length; i++) {
           this.advance();
@@ -216,11 +245,6 @@ export class Lexer {
         return new Token({ type: TokenType.Punct, value, loc });
       }
     }
-
-    // TODO do we have any multiple char punctuators not handled yet?
-    // anyway do NOT handle >> as one token
-    // we currently always skip expressions so there is no use of `>>`
-    // but adjacent `>` is commonly used
 
     // Single-char punctuation
     if (PUNCT_CHARS.has(c)) {

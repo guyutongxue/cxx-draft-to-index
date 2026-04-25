@@ -19,6 +19,7 @@ export interface FunctionLikeMacroSymbolEntry extends SymbolEntryBase {
 
 export interface ClassSymbolEntry extends SymbolEntryBase {
   kind: "class" | "struct" | "union";
+  base: string[]; // raw base specifiers for now, [] for union
 }
 
 export interface EnumSymbolEntry extends SymbolEntryBase {
@@ -35,16 +36,16 @@ export interface TypeAliasSymbolEntry extends SymbolEntryBase {
 export interface VariableSymbolEntry extends SymbolEntryBase {
   kind: "variable";
   type: string;
-  constexpr?: boolean;
-  inline?: boolean;
-  extern?: boolean;
+  constexpr: boolean;
+  inline: boolean;
+  extern: boolean;
 }
 
 export interface FunctionSymbolEntry extends SymbolEntryBase {
   kind: "function";
-  constexpr?: boolean;
-  operator?: string; // e.g. +, [], ""ms (udl), int (conversion)
-  explicit?: boolean; // ctor and conversion
+  constexpr: boolean;
+  operator: string | null; // e.g. +, [], ""ms (udl), int (conversion)
+  explicit: boolean | string; // ctor and conversion
   returnType: string; // "" for ctor and conversion
   isTrailingReturnType: boolean;
   parameters: string[]; // raw parameter strings for now

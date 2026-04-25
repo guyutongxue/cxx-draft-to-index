@@ -103,9 +103,17 @@ interface TemplateArgumentInfo {
 
 interface IdExpressionPartInfo {
   kind: IdPartKind;
+  /* The "printed" name */
   name: string;
-  // type name (no template args), null for computed
-  componentName: string | null;
+  /**
+   * - For Identifier, the name without template args
+   * - For Operator, the operator token's value
+   * - For UDL, the UDL suffix
+   * - For Conversion, the type-id in conversion function
+   * - For Destructor, the class name
+   * - Otherwise, null
+   */
+  value: string | null;
   templateArgs: TemplateArgumentInfo[] | null;
 }
 
@@ -118,9 +126,17 @@ interface IdExpressionInfo {
 type ClassTagKind = "class" | "struct" | "union";
 type ClassSpecifierUseKind = "definition" | "declaration" | "reference";
 
+interface BaseSpecifierInfo {
+  raw: string;
+  access: "public" | "protected" | "private" | null;
+  virtual: boolean;
+  typeId: IdExpressionInfo;
+}
+
 interface ClassSpecifierInfo {
   tagKind: ClassTagKind;
   name: string;
+  baseSpecifiers: BaseSpecifierInfo[];
   templateArgs: TemplateArgumentInfo[] | null;
   useKind: ClassSpecifierUseKind;
   raw: string;
@@ -543,7 +559,10 @@ export class Parser {
     if (!this.isP(";")) {
       declaratorList = this.parseDeclaratorList({ declSpecifier });
     }
-    this.adv(); // ;
+    if (declaratorList?.kind !== "functionDefinition") {
+      this.assertP(";");
+      this.adv(); // consume ;
+    }
     const { classSpecifier } = declSpecifier;
     if (classSpecifier && classSpecifier.useKind !== "reference") {
       if (classSpecifier.tagKind === "union") {
@@ -551,6 +570,7 @@ export class Parser {
         this.emitSymbol("union", {
           name: classSpecifier.name,
           raw: classSpecifier.raw + ";",
+          base: [],
         });
       } else if (templateInfo) {
         if (templateInfo.fullSpecialization) {
@@ -575,12 +595,14 @@ export class Parser {
             name: classSpecifier.name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             templateParams: templateInfo.templateParameters.map((p) => p.raw),
+            base: classSpecifier.baseSpecifiers.map((b) => b.raw),
           });
         }
       } else {
         this.emitSymbol("class", {
           name: classSpecifier.name,
           raw: classSpecifier.raw + ";",
+          base: classSpecifier.baseSpecifiers.map((b) => b.raw),
         });
       }
     }
@@ -588,7 +610,25 @@ export class Parser {
       return;
     }
     for (const declarator of declaratorList.declarators) {
+      const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
       if (declarator.function) {
+        let operator: string | null = null;
+        const lastPart = declarator.idExpr.parts.at(-1);
+        switch (lastPart?.kind) {
+          case IdPartKind.UDL:
+          case IdPartKind.Operator:
+          case IdPartKind.Conversion:
+            operator = lastPart.value;
+            break;
+        }
+        const returnType =
+          declarator.function.trailingReturnType ??
+          declSpecifier.typeSpecifiers.join(" ");
+        const isTrailingReturnType = !!declarator.function.trailingReturnType;
+        const explicit =
+          typeof declSpecifier.explicitSpecifier === "boolean"
+            ? declSpecifier.explicitSpecifier
+            : declSpecifier.explicitSpecifier.raw;
         if (templateInfo) {
           this.assert(
             declaratorList.declarators.length === 1,
@@ -597,14 +637,14 @@ export class Parser {
           if (!templateInfo.fullSpecialization) {
             this.emitSymbol("functionTemplate", {
               name: declarator.idExpr.name,
+              operator,
               parameters: declarator.function.params.map((p) => p.raw),
               raw: this.lexer.range(startLoc, this.tok.loc),
-              returnType:
-                declarator.function.trailingReturnType ??
-                declSpecifier.typeSpecifiers.join(" "),
-              isTrailingReturnType: !!declarator.function.trailingReturnType,
+              returnType,
+              isTrailingReturnType,
+              constexpr,
+              explicit,
               templateParams: templateInfo.templateParameters.map((p) => p.raw),
-              constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
               templateRequires: templateInfo.requiresClause,
             });
           } else {
@@ -623,13 +663,13 @@ export class Parser {
         } else {
           this.emitSymbol("function", {
             name: declarator.idExpr.name,
+            operator,
             parameters: declarator.function.params.map((p) => p.raw),
             raw: declSpecifier.raw + " " + declarator.raw + ";",
-            returnType:
-              declarator.function.trailingReturnType ??
-              declSpecifier.typeSpecifiers.join(" "),
-            isTrailingReturnType: !!declarator.function.trailingReturnType,
-            constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
+            returnType,
+            isTrailingReturnType,
+            constexpr,
+            explicit,
           });
         }
       } else {
@@ -1241,6 +1281,7 @@ export class Parser {
         name: idExpr.name,
         templateArgs: null,
         raw: this.lexer.range(startLoc, this.tok.loc),
+        baseSpecifiers: [],
       };
     }
 
@@ -1248,18 +1289,38 @@ export class Parser {
       this.adv(); // final
     }
 
+    const baseSpecifiers: BaseSpecifierInfo[] = [];
+
     if (this.tok.isP(":")) {
       this.adv();
       while (true) {
+        const startLoc = this.tok.loc;
+        let accessSpecifier: "public" | "protected" | "private" | null = null;
+        let virtual = false;
         this.tryParseAttribute();
         // access-specifier or virtual
         if (
           this.tok.type === TokenType.Identifier &&
           ["public", "protected", "private", "virtual"].includes(this.tok.value)
         ) {
+          if (this.tok.value === "virtual") {
+            virtual = true;
+          } else {
+            accessSpecifier = this.tok.value as
+              | "public"
+              | "protected"
+              | "private";
+          }
           this.adv();
         }
-        this.readIdExpression(); // class-or-decltype
+        const baseTypeId = this.readIdExpression(); // class-or-decltype
+        const raw = this.lexer.range(startLoc, this.tok.loc);
+        baseSpecifiers.push({
+          raw,
+          access: accessSpecifier,
+          virtual,
+          typeId: baseTypeId,
+        });
         if (!this.isP(",")) {
           break;
         }
@@ -1298,6 +1359,7 @@ export class Parser {
       name: this.nameWithoutTemplateArg(idExpr),
       templateArgs,
       useKind,
+      baseSpecifiers,
       raw,
     };
   }
@@ -1530,7 +1592,7 @@ export class Parser {
           parts.push({
             kind: IdPartKind.PointerToMember,
             name: "*",
-            componentName: null,
+            value: null,
             templateArgs: null,
           });
           return { name, fromGlobal, parts };
@@ -1561,7 +1623,7 @@ export class Parser {
     hasTemplateDisambiguation: boolean,
   ): IdExpressionPartInfo {
     let name = hasTemplateDisambiguation ? "template " : "";
-    let componentName: string | null = null;
+    let value: string | null = null;
     let kind: IdPartKind;
     let templateArgs: TemplateArgumentInfo[] | null = null;
     if (this.isId("decltype")) {
@@ -1583,12 +1645,47 @@ export class Parser {
     } else if (this.isId("operator")) {
       name += "operator";
       this.adv();
-      this.unimplemented(
-        "operator-function, conversion-function or literal-operator name parsing",
-      );
+      if (this.tok.type === TokenType.Punct) {
+        kind = IdPartKind.Operator;
+        value = this.tok.value;
+        if (this.tok.value === ">") {
+          const nextTok = this.nextTok();
+          if (nextTok.isP(">") || nextTok.isP(">=")) {
+            // operator>>, operator>>=
+            value += nextTok.value;
+            this.adv();
+          }
+        }
+        name += value;
+        this.adv();
+      } else if (this.isId("new") || this.isId("delete")) {
+        kind = IdPartKind.Operator;
+        value = this.tok.value;
+        name += " " + value;
+        this.adv();
+      } else if (this.tok.type === TokenType.StringLiteral) {
+        kind = IdPartKind.UDL;
+        this.assert(
+          this.tok.value === `""`,
+          `UDL string literal should be empty`,
+        );
+        name += `""`;
+        this.adv();
+        this.assert(
+          (this as this).tok.type === TokenType.Identifier,
+          `Expected identifier after UDL string literal`,
+        );
+        value = this.tok.value;
+        name += value;
+        this.adv();
+      } else {
+        kind = IdPartKind.Conversion;
+        value = this.readIdExpression().name;
+        name += value;
+      }
     } else if (this.isIdentifierOrLaTeX()) {
-      componentName = this.resolved(this.tok);
-      name += componentName;
+      value = this.resolved(this.tok);
+      name += value;
       this.adv();
       kind = IdPartKind.Identifier;
     } else {
@@ -1601,7 +1698,7 @@ export class Parser {
       this.skipBalancedBrackets("[", "]");
       const endLoc = this.tok.loc;
       name += this.lexer.range(startLoc, endLoc);
-      componentName = null;
+      value = null;
       kind = IdPartKind.Computed;
     }
     // simple-template-id
@@ -1611,7 +1708,7 @@ export class Parser {
       const endLoc = this.tok.loc;
       name += this.lexer.range(startLoc, endLoc);
     }
-    return { kind, name, componentName, templateArgs };
+    return { kind, name, value, templateArgs };
   }
 
   /** Used for specialization declarations */
@@ -1619,10 +1716,10 @@ export class Parser {
     const copy = [...idExpr.parts];
     const lastPart = copy.pop();
     this.assert(
-      lastPart?.componentName,
+      lastPart?.value,
       `Cannot call nameWithoutTemplateArg on a computed type-id`,
     );
-    return `${idExpr.fromGlobal ? "::" : ""}${copy.map((p) => p.name + "::").join("")}${lastPart.componentName}`;
+    return `${idExpr.fromGlobal ? "::" : ""}${copy.map((p) => p.name + "::").join("")}${lastPart.value}`;
   }
 
   /**

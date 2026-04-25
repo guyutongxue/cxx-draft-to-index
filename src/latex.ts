@@ -50,7 +50,11 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
 
   return new Map(
     await Promise.all(
-      files.entries().map(async ([k, v]) => [k, applyPatches(k, await v)] satisfies AnyTuple),
+      files
+        .entries()
+        .map(
+          async ([k, v]) => [k, applyPatches(k, await v)] satisfies AnyTuple,
+        ),
     ),
   );
 }
