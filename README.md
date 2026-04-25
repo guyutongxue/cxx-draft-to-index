@@ -6,15 +6,18 @@ A tool to parse and index C++ standard draft documents.
 
 **This project is still in very early development.** The implementation is incomplete, APIs are unstable, and functionality is subject to change. Use at your own risk.
 
+TODO:
+- class member and nested declarations
+- enumerators
+
 ## Overview
 
 This project aims to extract structured information from C++ Committee draft papers and generate searchable indices. It includes:
 
+- **Synopsis extraction** - Extract source codes from LaTeX-written C++ drafts
+- **C++ Preprocessor** - Handles C++ preprocessing directives
 - **C++ Lexer** - Tokenizes C++ source code
 - **C++ Parser** - Parses C++ syntax 
-- **C++ Preprocessor** - Handles C++ preprocessing directives
-- **LaTeX Support** - Parses LaTeX documentation (used in C++ drafts)
-- **Document Processing** - Processes C++ standard draft documents
 
 ## Project Structure
 
@@ -24,9 +27,9 @@ src/
 │   ├── lexer.ts     # Tokenization
 │   ├── parser.ts    # Syntax parsing
 │   ├── pp.ts        # Preprocessor
-│   ├── latex.ts     # LaTeX parsing
+│   ├── latex.ts     # LaTeX replacements
 │   └── index.ts
-├── latex.ts         # General LaTeX utilities
+├── latex.ts         # LaTeX synopsis extraction
 ├── types.ts         # Type definitions
 └── main.ts          # Entry point
 
