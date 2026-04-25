@@ -56,6 +56,10 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
   const files = new Map<string, Promise<string>>();
 
   for await (const name of new Glob("*.tex").scan(SUBMODULE_SOURCE_DIR)) {
+    if (name === "future.tex") {
+      // this file contains deprecated synopses, skip
+      continue;
+    }
     const filePath = join(SUBMODULE_SOURCE_DIR, name);
     const content = Bun.file(filePath).text();
     files.set(name, content);
