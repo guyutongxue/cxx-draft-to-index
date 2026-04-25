@@ -68,7 +68,7 @@ namespace std {
   parser.parseTopLevel();
   expect(parser.symbols[0]).toMatchObject({
     kind: "typeAlias",
-    name: "c-atexit-handler",
+    name: "__c_atexit_handler",
     languageLinkage: "C",
   });
 })
