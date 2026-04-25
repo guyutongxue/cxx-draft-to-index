@@ -49,10 +49,11 @@ bun install
 ### Running
 
 ```bash
+# Fetch the latest C++ Standard draft source
+git submodule update --remote --init
 # Build/run the main script
 bun run src/main.ts
 ```
-
 
 ## Contributing
 
@@ -60,4 +61,4 @@ This is a very early-stage project. If you'd like to contribute, please be aware
 
 ## License
 
-[To be determined]
+Apache-2.0
