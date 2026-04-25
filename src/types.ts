@@ -82,9 +82,8 @@ export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
 }
 
 export interface DeductionGuideSymbolEntry
-  extends SymbolEntryBase, TemplateInfo {
+  extends SymbolEntryBase, Partial<TemplateInfo> {
   kind: "deductionGuide";
-  constructorName: string;
   parameters: string[];
   targetType: string;
 }

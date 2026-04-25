@@ -10,6 +10,7 @@ import { Lexer, Location, Token, TokenType } from "./lexer";
 import { produce } from "immer";
 
 interface ParserContext {
+  readonly linkageStack: readonly string[];
   // TODO support class/enum scope
   readonly nsStack: readonly string[];
   readonly symbols: readonly SymbolEntry[];
@@ -117,6 +118,10 @@ interface IdExpressionPartInfo {
   templateArgs: TemplateArgumentInfo[] | null;
 }
 
+/**
+ * A parsing result of id-expression or type-id.
+ * For id-expression, the last part should not be Computed
+ */
 interface IdExpressionInfo {
   name: string;
   fromGlobal: boolean;
@@ -135,11 +140,19 @@ interface BaseSpecifierInfo {
 
 interface ClassSpecifierInfo {
   tagKind: ClassTagKind;
-  name: string;
+  id: IdExpressionInfo;
   baseSpecifiers: BaseSpecifierInfo[];
   templateArgs: TemplateArgumentInfo[] | null;
   useKind: ClassSpecifierUseKind;
   raw: string;
+  // TODO member
+}
+
+interface EnumSpecifierInfo {
+  scoped: boolean | "class" | "struct";
+  id: IdExpressionInfo;
+  baseType: string | null;
+  // TODO enumerator
 }
 
 interface CvQualifierSet {
@@ -150,10 +163,13 @@ interface CvQualifierSet {
 interface DeclarationSpecifierInfo {
   raw: string;
   typeSpecifiers: string[];
+  // cv-qualifiers type-specifiers|class-name|enum-name
+  typeString: string;
   cvQualifiers: CvQualifierSet;
   declSpecifiers: DeclSpecifierKeyword[];
   explicitSpecifier: boolean | ExpressionInfo;
   classSpecifier: ClassSpecifierInfo | null;
+  enumSpecifier: EnumSpecifierInfo | null;
 }
 
 interface DeclaratorInfo {
@@ -169,9 +185,12 @@ interface InitDeclaratorInfo extends DeclaratorInfo {
   initializer: string | null; // raw string?
 }
 
+type SpecialFunctionBody = "pure" | "defaulted" | "deleted";
+
 interface DeclaratorListInfo {
   declarators: InitDeclaratorInfo[];
   kind: "simple" | "functionDefinition" | "friendType" | "deductionGuide";
+  specialFunctionBody: SpecialFunctionBody | null;
 }
 
 interface FunctionQualifierInfo {
@@ -224,6 +243,7 @@ export class Parser {
     this.lexer = lexer;
     this.filename = filename;
     this.context = {
+      linkageStack: [],
       nsStack: [],
       symbols: [],
     };
@@ -456,11 +476,11 @@ export class Parser {
     if (this.isId("extern")) {
       const nextTok = this.nextTok();
       if (nextTok.type === TokenType.StringLiteral) {
-        return this.parseLinkage({ startLoc });
+        return this.parseLinkage();
       }
     }
     if (this.isId("export")) {
-      return this.parseExportDeclaration({ startLoc });
+      return this.parseExportDeclaration();
     }
     return this.parseDeclaration({
       startLoc,
@@ -510,7 +530,11 @@ export class Parser {
       });
     }
     if (this.isId("static_assert")) {
-      this.unimplemented("static_assert");
+      // skip
+      this.adv(); // static_assert
+      this.skipBalancedBrackets("(", ")");
+      this.assertP(";");
+      this.adv(); // ;
     }
     return this.parseSimpleDeclarationOrFunctionDefinition({
       startLoc,
@@ -520,11 +544,33 @@ export class Parser {
     });
   }
 
-  private parseLinkage({}: { startLoc: Location }) {
-    this.unimplemented("linkage specification");
+  private parseLinkage() {
+    this.assertId("extern");
+    this.adv();
+    this.assert(
+      this.tok.type === TokenType.StringLiteral,
+      "Expected string literal",
+    );
+    const linkage = this.tok.value.slice(1, -1);
+    this.adv();
+    produce(this.context, (ctx) => {
+      ctx.linkageStack.push(linkage);
+    });
+    if (this.isP("{")) {
+      while (!this.isP("}")) {
+        this.parseExternalDeclaration();
+      }
+      this.assertP("}");
+      this.adv(); // consume }
+    } else {
+      this.parseExternalDeclaration();
+    }
+    produce(this.context, (ctx) => {
+      ctx.linkageStack.pop();
+    });
   }
 
-  private parseExportDeclaration({}: { startLoc: Location }) {
+  private parseExportDeclaration() {
     this.unimplemented("export declaration");
   }
 
@@ -568,7 +614,7 @@ export class Parser {
       if (classSpecifier.tagKind === "union") {
         this.assert(!templateInfo, "union cannot be template");
         this.emitSymbol("union", {
-          name: classSpecifier.name,
+          name: classSpecifier.id.name,
           raw: classSpecifier.raw + ";",
           base: [],
         });
@@ -579,20 +625,20 @@ export class Parser {
             "full specialization must have template args",
           );
           this.emitSymbol("fullTemplateSpecialization", {
-            name: classSpecifier.name,
+            name: this.nameWithoutTemplateArg(classSpecifier.id),
             raw: this.lexer.range(startLoc, this.tok.loc),
             templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
           });
         } else if (classSpecifier.templateArgs) {
           this.emitSymbol("partialTemplateSpecialization", {
-            name: classSpecifier.name,
+            name: this.nameWithoutTemplateArg(classSpecifier.id),
             raw: this.lexer.range(startLoc, this.tok.loc),
             templateParams: templateInfo.templateParameters.map((p) => p.raw),
             templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
           });
         } else {
           this.emitSymbol("classTemplate", {
-            name: classSpecifier.name,
+            name: classSpecifier.id.name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             templateParams: templateInfo.templateParameters.map((p) => p.raw),
             base: classSpecifier.baseSpecifiers.map((b) => b.raw),
@@ -600,7 +646,7 @@ export class Parser {
         }
       } else {
         this.emitSymbol("class", {
-          name: classSpecifier.name,
+          name: classSpecifier.id.name,
           raw: classSpecifier.raw + ";",
           base: classSpecifier.baseSpecifiers.map((b) => b.raw),
         });
@@ -622,13 +668,27 @@ export class Parser {
             break;
         }
         const returnType =
-          declarator.function.trailingReturnType ??
-          declSpecifier.typeSpecifiers.join(" ");
+          declarator.function.trailingReturnType ?? declSpecifier.typeString;
         const isTrailingReturnType = !!declarator.function.trailingReturnType;
         const explicit =
           typeof declSpecifier.explicitSpecifier === "boolean"
             ? declSpecifier.explicitSpecifier
             : declSpecifier.explicitSpecifier.raw;
+        if (
+          declSpecifier.typeSpecifiers.length === 0 &&
+          declarator.function.trailingReturnType
+        ) {
+          // must be deduction guide e.g. C(T) -> C<T>
+          this.emitSymbol("deductionGuide", {
+            name: declarator.idExpr.name,
+            raw: this.lexer.range(startLoc, this.tok.loc),
+            parameters: declarator.function.params.map((p) => p.raw),
+            targetType: declarator.function.trailingReturnType,
+            templateParams: templateInfo?.templateParameters.map((p) => p.raw),
+            templateRequires: templateInfo?.requiresClause,
+          });
+          break;
+        }
         if (templateInfo) {
           this.assert(
             declaratorList.declarators.length === 1,
@@ -711,6 +771,7 @@ export class Parser {
     const startLoc = this.tok.loc;
     // decl-specifier* attr-specifier*
     let classSpecifier: ClassSpecifierInfo | null = null;
+    let enumSpecifier: EnumSpecifierInfo | null = null;
     const typeSpecifiers: string[] = [];
     const cvQualifiers = {
       const: false,
@@ -758,8 +819,11 @@ export class Parser {
       }
       const id = this.tok.value;
       if (id === "decltype") {
-        // decltype(...)
-        this.unimplemented("decltype in decl-specifier");
+        const startLoc = this.tok.loc;
+        this.adv(); // decltype
+        this.skipBalancedBrackets("(", ")");
+        const endLoc = this.tok.loc;
+        typeSpecifiers.push(this.lexer.range(startLoc, endLoc));
       } else if ((DECL_SPECIFIER_KEYWORD as readonly string[]).includes(id)) {
         declSpecifiers.push(id as DeclSpecifierKeyword);
         this.adv();
@@ -772,11 +836,9 @@ export class Parser {
           const endLoc = this.tok.loc;
           explicit = { raw: this.lexer.range(startLoc, endLoc) };
         }
-        continue;
       } else if (TYPE_SPECIFIER_KEYWORD.includes(id)) {
         typeSpecifiers.push(id);
         this.adv();
-        continue;
       } else if (id === "auto") {
         this.assert(
           typeSpecifiers.length < 2,
@@ -793,9 +855,7 @@ export class Parser {
           contextType,
         });
       } else if (id === "enum") {
-        // enum E e;     // elaborated-type-specifier
-        // enum E { } e; // enum-specifier
-        this.unimplemented("enum-head");
+        enumSpecifier = this.parseEnumSpecifier();
       } else if (id === "const" || id === "volatile") {
         cvQualifiers[id] = true;
         this.adv();
@@ -813,12 +873,21 @@ export class Parser {
       }
     }
     this.tryParseAttribute();
+    const typeString = [
+      ...(cvQualifiers.const ? ["const"] : []),
+      ...(cvQualifiers.volatile ? ["volatile"] : []),
+      ...typeSpecifiers,
+      ...(classSpecifier ? [classSpecifier.id.name] : []),
+      ...(enumSpecifier ? [enumSpecifier.id.name] : []),
+    ].join(" ");
     return {
       typeSpecifiers,
+      typeString,
       cvQualifiers,
       declSpecifiers,
       explicitSpecifier: explicit,
       classSpecifier,
+      enumSpecifier,
       raw: this.lexer.range(startLoc, this.tok.loc),
     };
   }
@@ -830,6 +899,7 @@ export class Parser {
   }): DeclaratorListInfo {
     let declarators: InitDeclaratorInfo[] = [];
     let kind: DeclaratorListInfo["kind"] = "simple";
+    let specialFunctionBody: SpecialFunctionBody | null = null;
     outermost: while (true) {
       // friend class A, class B;
       // friend class Ts...;
@@ -845,11 +915,43 @@ export class Parser {
       let initializer: string | null = null;
       if (declarator.function) {
         if (this.isP("=")) {
-          // = 0, = default, = delete (reason)
-          this.unimplemented("pure, defaulted or deleted function");
+          kind = "functionDefinition";
+          this.adv(); // =
+          if (this.tok.type === TokenType.Number && this.tok.value === "0") {
+            // pure virtual function
+            specialFunctionBody = "pure";
+          } else if (this.isId("default")) {
+            this.adv(); // default
+            specialFunctionBody = "defaulted";
+          } else {
+            this.assertId("delete");
+            this.adv(); // delete
+            if (this.isP("(")) {
+              this.skipBalancedBrackets("(", ")");
+            }
+            specialFunctionBody = "deleted";
+          }
+          break outermost;
+        }
+        let isTryBlock = false;
+        if (this.isP("try")) {
+          this.adv(); // try
+          isTryBlock = true;
+        }
+        if (this.isP(":")) {
+          // SKIP ctor initializer list
+          this.skipBalancedTokensUntilPunct(["{"], false);
         }
         if (this.isP("{")) {
           this.skipBalancedBrackets("{", "}");
+          if (isTryBlock) {
+            this.assertP("catch");
+            while (this.isP("catch")) {
+              this.adv(); // catch
+              this.skipBalancedBrackets("(", ")");
+              this.skipBalancedBrackets("{", "}");
+            }
+          }
           kind = "functionDefinition";
           break outermost;
         }
@@ -877,7 +979,7 @@ export class Parser {
       this.assertP(",");
       this.adv(); // ,
     }
-    return { declarators, kind };
+    return { declarators, kind, specialFunctionBody };
   }
 
   private parseDeclarator({
@@ -933,22 +1035,16 @@ export class Parser {
       join = "";
       return punct + " ";
     });
-    const leading = declSpecifier.typeSpecifiers.join(" ");
+    const leading = declSpecifier.typeString;
     const functionInfo =
       surrounding[0]?.kind === "function" ? surrounding[0] : null;
-    if (leading === "") {
+    if (declSpecifier.typeString === "") {
       this.assert(
         functionInfo,
         `Declaration without type-specifier must be function (ctor, dtor or conversion)`,
       );
     }
     typeInfo = `${leading}${join}${typeInfo}`.trim();
-    if (declSpecifier.cvQualifiers.volatile) {
-      typeInfo = "volatile " + typeInfo;
-    }
-    if (declSpecifier.cvQualifiers.const) {
-      typeInfo = "const " + typeInfo;
-    }
     return {
       idExpr,
       raw: this.lexer.range(startLoc, endLoc),
@@ -960,7 +1056,7 @@ export class Parser {
   private parseDeclaratorImpl(depth: number): PartialDeclaratorInfo {
     const ptrToMemberPrefix = this.tryReadPointerToMemberDeclaratorPrefix();
     if (ptrToMemberPrefix) {
-      this.unimplemented("pointer to member declarator");
+      this.unimplemented("pointer-to-member declarator");
     }
     const prefix: DeclaratorSurrounding[] = [];
     while (
@@ -1004,6 +1100,10 @@ export class Parser {
           surrounding.push(this.parseParameterAndQualifiers());
           transaction.commit();
         } catch (e) {
+          console.warn(
+            "Function declaration parsing failure, fallback to variable initialization; this MIGHT not happened: ",
+            e,
+          );
           // Should not fail when depth > 0 i.e. `int (x (HERE));`
           // which HERE must be parsed parameter list not initializer
           if (depth > 0) {
@@ -1035,6 +1135,7 @@ export class Parser {
       this.assertId("inline");
       this.adv(); // "inline"
     }
+    const startLoc = this.tok.loc;
     this.assertId("namespace");
     this.adv(); // "namespace"
 
@@ -1058,7 +1159,16 @@ export class Parser {
 
     // namespace X = Y;
     if (this.isP("=")) {
-      this.unimplemented("namespace alias");
+      this.adv(); // =
+      const targetExpr = this.readIdExpression();
+      this.assertP(";");
+      this.adv(); // ;
+      this.emitSymbol("namespaceAlias", {
+        name,
+        targetNamespace: targetExpr.name,
+        raw: this.lexer.range(startLoc, this.tok.loc),
+      });
+      return;
     }
 
     // namespace { ... }
@@ -1096,15 +1206,33 @@ export class Parser {
 
     // using namespace X;
     if (this.isId("namespace")) {
-      return this.parseUsingDirective();
+      this.assert(!templateInfo, `using-directive cannot be templated`);
+      return this.parseUsingDirective({ startLoc });
     }
 
     return this.parseUsingDeclaration({ templateInfo, startLoc });
   }
 
-  private parseUsingDirective(): void {
+  private parseUsingDirective({ startLoc }: { startLoc: Location }): void {
     this.assertId("namespace");
-    this.unimplemented("using-directive");
+    this.adv(); // namespace
+    const idExpr = this.readIdExpression();
+    this.assertP(";");
+    this.adv();
+    this.emitSymbol("usingDirective", {
+      name: "", // using-directive does not introduce a name
+      targetNamespace: idExpr.name,
+      raw: this.lexer.range(startLoc, this.tok.loc),
+    });
+  }
+
+  private parseUsingEnumDeclaration(): void {
+    this.assertId("enum");
+    this.adv(); // enum
+    this.readIdExpression();
+    this.assertP(";");
+    this.adv();
+    // TODO should we emit symbol for using enum declaration?
   }
 
   private parseUsingDeclaration({
@@ -1120,7 +1248,8 @@ export class Parser {
     }
 
     if (this.isId("enum")) {
-      this.unimplemented("using-enum-declaration");
+      this.assert(!templateInfo, `using-enum cannot be templated`);
+      return this.parseUsingEnumDeclaration();
     }
 
     let idExpr = this.readIdExpression();
@@ -1132,9 +1261,9 @@ export class Parser {
         parts.length === 1 && parts[0].kind === IdPartKind.Identifier,
         `Name introduced by using-alias-declaration should be identifier`,
       );
+      this.adv(); // =
+      this.skipBalancedTokensUntilPunct([";"], true);
       this.adv();
-      this.skipBalancedTokensUntilPunct([",", ";"], true);
-      if (this.isP(";")) this.adv();
       if (templateInfo) {
         this.emitSymbol("typeAliasTemplate", {
           name,
@@ -1157,7 +1286,7 @@ export class Parser {
       const { name, parts } = idExpr;
       this.emitSymbol("usingDeclaration", {
         name: parts.at(-1)!.name,
-        raw: this.lexer.range(startLoc, this.tok.loc),
+        raw: this.lexer.range(startLoc, this.tok.loc) + ";",
         target: name,
       });
       if (this.isP(";")) {
@@ -1278,7 +1407,7 @@ export class Parser {
       return {
         tagKind,
         useKind: "reference",
-        name: idExpr.name,
+        id: idExpr,
         templateArgs: null,
         raw: this.lexer.range(startLoc, this.tok.loc),
         baseSpecifiers: [],
@@ -1356,7 +1485,7 @@ export class Parser {
     const raw = this.lexer.range(startLoc, endLoc);
     return {
       tagKind,
-      name: this.nameWithoutTemplateArg(idExpr),
+      id: idExpr,
       templateArgs,
       useKind,
       baseSpecifiers,
@@ -1471,8 +1600,52 @@ export class Parser {
 
   // ---- Enum ----
 
-  private parseEnum(): void {
-    this.unimplemented("enum");
+  private parseEnumBase(): string {
+    this.assertP(":");
+    this.adv(); // :
+    const startLoc = this.tok.loc;
+    // LOOSE PARSE: skip base type
+    this.skipBalancedTokensUntilPunct(["{", ";"], true);
+    const endLoc = this.tok.loc;
+    return this.lexer.range(startLoc, endLoc);
+  }
+
+  /**
+   * ```
+   * enum E e;     // elaborated-type-specifier
+   * enum E { } e; // enum-specifier
+   * ```
+   */
+  private parseEnumSpecifier(): EnumSpecifierInfo {
+    this.assertId("enum");
+    this.adv(); // enum
+    let scoped: boolean | "class" | "struct" = false;
+    let baseType: string | null = null;
+    if (this.isId("class") || this.isId("struct")) {
+      scoped = this.tok.value as "class" | "struct";
+      this.adv(); // class|struct
+    }
+    this.tryParseAttribute();
+    // anonymous enum: `enum { ... };`
+    // optionally with base type: `enum : int { ... };`
+    if (!scoped) {
+      if (this.isP(":")) {
+        baseType = this.parseEnumBase();
+        this.skipBalancedBrackets("{", "}");
+      }
+    }
+    const id = this.readIdExpression();
+    if (this.isP(":")) {
+      baseType = this.parseEnumBase();
+    }
+    if (this.isP("{")) {
+      this.skipBalancedBrackets("{", "}");
+    }
+    return {
+      id,
+      scoped,
+      baseType,
+    };
   }
 
   // ---- Concept ----
@@ -1491,7 +1664,11 @@ export class Parser {
 
     this.assertP("=");
     this.adv(); // =
-    this.parseConstraintExpression();
+    // this.parseConstraintExpression();
+    // LOOSE PARSE because <execution> said:
+    // concept __forwarding_query = forwarding_query(T{})
+    // this is an expression bro, we don't have parseExpression now
+    this.skipBalancedTokensUntilPunct([";"], true);
     this.assertP(";");
     this.adv(); // ;
     this.emitSymbol("concept", {
@@ -1830,7 +2007,7 @@ export class Parser {
     // - &&         : e.g. C(T&& v);
     // - ,          : e.g. C(T, int);
     // - ...        : e.g. C(T...);
-    // then it must be a ctor declaration, otherwise we cannot disambiguate AT ALL.
+    // then it must be a ctor declaration
     this.tryParseAttribute();
     if (
       this.isIdentifierOrLaTeX() ||
@@ -1838,6 +2015,14 @@ export class Parser {
         ["*", "&", "&&", ",", "..."].includes(this.tok.value))
     ) {
       return true;
+    }
+    if (this.isP(")")) {
+      // work on more...
+      const nextTok = this.nextTok();
+      if (nextTok.isP("->") || nextTok.isP(":")) {
+        // trailing return type or ctor initializer list, must be a ctor declaration
+        return true;
+      }
     }
     this.die(
       `Disambiguate failure: cannot determine whether current declaration is a constructor`,
@@ -1878,11 +2063,9 @@ export class Parser {
       ...info,
       header: this.filename,
       namespace: this.context.nsStack.join("::"),
-      // indicates a CPO
       // TODO inlineUnspecifiedNamespace
-      // TODO languageLinkage
+      languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as SymbolEntry;
-    console.log(symbol);
     this.context = produce(this.context, (ctx) => {
       ctx.symbols.push(symbol);
     });

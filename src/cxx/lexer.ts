@@ -54,6 +54,14 @@ export class Token implements IToken {
 
 const PUNCT_CHARS = new Set("{}()[]<>;:?.~!+-*/%^&|=,".split(""));
 
+function hasOddTrailingBackslashes(value: string): boolean {
+  let count = 0;
+  for (let i = value.length - 2; i >= 0 && value[i] === "\\"; i--) {
+    count++;
+  }
+  return count % 2 === 1;
+}
+
 export class Lexer {
   private readonly src: string;
   private pos: number;
@@ -167,7 +175,7 @@ export class Lexer {
       while (this.pos < this.srcLen) {
         const x = this.advance();
         value += x;
-        if (x === '"' && value[value.length - 2] !== "\\") break;
+        if (x === '"' && !hasOddTrailingBackslashes(value)) break;
       }
       return new Token({ type: TokenType.StringLiteral, value, loc });
     }
@@ -178,7 +186,7 @@ export class Lexer {
       while (this.pos < this.srcLen) {
         const x = this.advance();
         value += x;
-        if (x === "'" && value[value.length - 2] !== "\\") break;
+        if (x === "'" && !hasOddTrailingBackslashes(value)) break;
       }
       return new Token({ type: TokenType.CharLiteral, value, loc });
     }
@@ -204,6 +212,17 @@ export class Lexer {
       let value = "";
       while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
         value += this.advance();
+        // LaTeX escape may occurs inside identifier, e.g.:
+        // using int@\placeholdernc{N}@_t = @\seebelow@;
+        if (this.ch === "@") {
+          value += this.advance(); // consume @
+          while (this.pos < this.srcLen && this.ch !== "@") {
+            value += this.advance();
+          }
+          if (this.pos < this.srcLen) {
+            value += this.advance();
+          }
+        }
       }
       return new Token({ type: TokenType.Identifier, value, loc });
     }

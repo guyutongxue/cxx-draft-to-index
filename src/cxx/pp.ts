@@ -1,26 +1,38 @@
 import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../types";
 import { resolveLaTeXInText } from "./latex";
 
-
 interface PreprocessResult {
   preprocessedCode: string;
   macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
 }
 
+// Replace these commands to empty string:
+// \vdots: renders a vertical ellipsis, which is used to omit lines
+// \itcorr: alignment correction for italic text, should not appear in code
+const PREPROCESSED_LATEX = /@(\\vdots|\\itcorr(\[[^\]]*\])?)@/g;
+
 export function preprocessCode(code: string, header: string): PreprocessResult {
   const symbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[] = [];
-  const lines = code.split("\n");
+  const lines = code.replace(PREPROCESSED_LATEX, "").split("\n");
 
   // join lines with backslashes
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
+    let join = false;
     if (line.endsWith("\\")) {
-      // Join with next line
-      if (i + 1 < lines.length) {
-        lines[i] = line.slice(0, -1) + lines[i + 1];
-        lines.splice(i + 1, 1);
-        i--; // reprocess this line in case of multiple continuations
-      }
+      join = true;
+    }
+    // A % at the end of line comment indicates concatenation
+    // since comments are automatically escaped
+    if (line.match(/\/\/.*%$/)) {
+      join = true;
+      lines[i] = line.slice(0, -1);
+    }
+    // Join with next line
+    if (join && i + 1 < lines.length) {
+      lines[i] = line.slice(0, -1) + lines[i + 1];
+      lines.splice(i + 1, 1);
+      i--; // reprocess this line in case of multiple continuations
     }
   }
 

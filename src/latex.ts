@@ -20,6 +20,19 @@ const PATCHES = {
       `             class T = projected_value_t<I, Proj>,`,
     ],
   ],
+  "support.tex": [
+    [`  \\indexlibraryglobal{align_val_t}%`, ""],
+    [`  \\indexlibraryglobal{destroying_delete_t}%`, ""],
+    [`  \\indexlibraryglobal{destroying_delete}%`, ""],
+    [`  \\indexlibraryglobal{nothrow_t}%`, ""],
+    [`  \\indexlibraryglobal{nothrow}`, ""],
+  ],
+  "numerics.tex": [
+    [
+      `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...)>,`,
+      `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...),`
+    ]
+  ]
 } as Record<string, [string, string][]>;
 
 function applyPatches(fileName: string, content: string): string {
@@ -141,7 +154,10 @@ function findNextCodeblock(lines: string[], startFrom: number): number | null {
 function findCodeblockEnd(lines: string[], codeStart: number): number | null {
   for (let i = codeStart + 1; i < lines.length; i++) {
     const trimmed = lines[i].trim();
-    if (trimmed === "\\end{codeblock}" || trimmed === "\\end{codeblocktu}") {
+    if (
+      trimmed.startsWith("\\end{codeblock}") ||
+      trimmed.startsWith("\\end{codeblocktu}")
+    ) {
       return i;
     }
   }

@@ -44,9 +44,6 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   // [/^\\tcode\{([^}]*)\}$/g, "$1"],
   // [/^\\keyword\{([^}]+)\}$/g, "$1"],
   // [/^\\term\{([^}]+)\}$/g, "$1"],
-
-  // alignment
-  [/^\\itcorr(?:\[[^\]]*\])?$/g, ""],
 ];
 
 function resolveSingleLaTeX(text: string): string {
