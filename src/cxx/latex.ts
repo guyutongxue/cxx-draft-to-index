@@ -37,9 +37,9 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   [/^\\exposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposid\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\exposidnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  // placeholders, should be as-is
-  [/^\\placeholder\{([^}]+)\}$/g, "$1"],
-  [/^\\placeholdernc\{([^}]+)\}$/g, "$1"],
+  // placeholders
+  [/^\\placeholder\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\placeholdernc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
 
   // [/^\\tcode\{([^}]*)\}$/g, "$1"],
   // [/^\\keyword\{([^}]+)\}$/g, "$1"],

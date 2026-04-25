@@ -64,6 +64,7 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             kind: "functionLikeMacro",
             raw: resolved,
             parameters,
+            languageLinkage: null,
           });
         } else {
           symbols.push({
@@ -72,6 +73,7 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             name,
             kind: "macro",
             raw: resolved,
+            languageLinkage: null,
           });
         }
       }

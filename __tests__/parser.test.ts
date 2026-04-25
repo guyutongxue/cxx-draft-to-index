@@ -56,3 +56,19 @@ volatile int (*const ptrArr)[42];
     type: "volatile int (*const)[42]",
   });
 });
+
+test("language linkage", () => {
+  const code = `
+namespace std {
+  // Exposition-only function type aliases
+  extern "C" using @\\placeholdernc{c-atexit-handler}@ = void();  
+}`;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  parser.parseTopLevel();
+  expect(parser.symbols[0]).toMatchObject({
+    kind: "typeAlias",
+    name: "c-atexit-handler",
+    languageLinkage: "C",
+  });
+})

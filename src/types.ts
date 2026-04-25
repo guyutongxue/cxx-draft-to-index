@@ -5,7 +5,7 @@ export interface SymbolEntryBase {
   inlineUnspecifiedNamespace?: boolean;
   raw: string;
   name: string;
-  languageLinkage?: "C" | "C++";
+  languageLinkage: "C" | "C++" | null;
 }
 
 export interface MacroSymbolEntry extends SymbolEntryBase {

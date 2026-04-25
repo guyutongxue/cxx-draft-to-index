@@ -553,7 +553,7 @@ export class Parser {
     );
     const linkage = this.tok.value.slice(1, -1);
     this.adv();
-    produce(this.context, (ctx) => {
+    this.context = produce(this.context, (ctx) => {
       ctx.linkageStack.push(linkage);
     });
     if (this.isP("{")) {
@@ -565,7 +565,7 @@ export class Parser {
     } else {
       this.parseExternalDeclaration();
     }
-    produce(this.context, (ctx) => {
+    this.context = produce(this.context, (ctx) => {
       ctx.linkageStack.pop();
     });
   }
