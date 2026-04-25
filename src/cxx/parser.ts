@@ -2173,6 +2173,18 @@ export class Parser {
     return false;
   }
 
+  /**
+   * TODO The argument of nested-name-specifier might point to the main template or partial specialization; we need to:
+   * - resolve the template parameter name and corresponding argument
+   * - if argument literally equals to the parameter, then it should refer to the primary template; otherwise, this refers to a partial specialization
+   * 
+   * @ref [expr.prim.id.qual]
+   * (4.5) If a nested-name-specifier N is declarative and has a simple-template-id with a template argument list A that involves a template parameter, let T be the template nominated by N without A. T shall be a class template.
+   * (4.5.1) If A is the template argument list ([temp.arg]) of the corresponding template-head H ([temp.mem]), N designates the primary template of T; H shall be equivalent to the template-head of T ([temp.over.link]).
+   * (4.5.2) Otherwise, N designates the partial specialization ([temp.spec.partial]) of T whose template argument list is equivalent to A ([temp.over.link]); the program is ill-formed if no such partial specialization exists.
+   *
+   */
+
   /** Used for specialization declarations */
   private nameWithoutTemplateArg(idExpr: IdExpressionInfo): string {
     const copy = [...idExpr.parts];

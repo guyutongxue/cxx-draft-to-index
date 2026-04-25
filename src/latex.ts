@@ -103,9 +103,11 @@ function extractFromSingleFile(
   const results: HeaderSynopsis[] = [];
   const lines = content.split("\n");
 
-  for (let i = 0; i < lines.length; i++) {
-    const headerName = isHeaderMarker(lines, i);
+  let i = 0;
+  while (i < lines.length) {
+    const headerName = isHeaderMarker(lines[i]);
     if (!headerName) {
+      i++;
       continue;
     }
     let hasSynopsis = false;
@@ -119,7 +121,7 @@ function extractFromSingleFile(
       if (code === null) {
         break;
       }
-      if (hasSynopsis && !isClassDefinitionCodeblock(code)) {
+      if (hasSynopsis /* && !isClassDefinitionCodeblock(code) */) {
         continue;
       }
       hasSynopsis = true;
@@ -130,17 +132,11 @@ function extractFromSingleFile(
       });
     }
   }
-
   return results;
 }
 
-function isHeaderMarker(lines: string[], lineIdx: number): string | null {
-  const line = lines[lineIdx];
-
-  const indexHeaderMatch = line.match(/\\indexheader\{([^}]+)\}/);
-  if (indexHeaderMatch) return indexHeaderMatch[1];
-
-  return null;
+function isHeaderMarker(line: string): string | null {
+  return line.match(/\\(?:indexheader|libheaderdef)\{([^}]+)\}/)?.[1] ?? null;
 }
 
 function findNextCodeblockInThisHeader(
@@ -150,24 +146,24 @@ function findNextCodeblockInThisHeader(
 ): [content: string | null, endIdx: number] {
   let startLine: number | null = null;
   for (let i = startFrom; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (isHeaderMarker(lines, i)) {
+    if (isHeaderMarker(lines[i])) {
       if (startLine) {
         throw new Error(`Unclosed codeblock starting at ${fileName}:${i + 1}`);
       }
       return [null, i];
     }
+    const trimmed = lines[i].trim();
     if (startLine === null) {
       if (
         trimmed.startsWith("\\begin{codeblock}") ||
-        trimmed.startsWith("\\begin{codeblocktu}")
+        trimmed.startsWith("\\begin{codeblockdigitsep}")
       ) {
         startLine = i;
       }
     } else {
       if (
         trimmed.startsWith("\\end{codeblock}") ||
-        trimmed.startsWith("\\end{codeblocktu}")
+        trimmed.startsWith("\\end{codeblockdigitsep}")
       ) {
         return [lines.slice(startLine + 1, i).join("\n"), i];
       }
