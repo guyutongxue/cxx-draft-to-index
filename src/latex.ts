@@ -32,6 +32,50 @@ const PATCHES = {
       `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...)>,`,
       `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...),`,
     ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y,`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,\n`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,\n`
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,`
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y,`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const @\\exposid{deduced-vec-t}@<V>& x, const V& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,\n`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const V& x, const @\\exposid{deduced-vec-t}@<V>& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,\n`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y,`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const @\\exposid{deduced-vec-t}@<V>& x, const V& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,\n`,
+    ],
+    [
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y\n`,
+      `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,\n`,
+    ]
   ],
 } as Record<string, [string, string][]>;
 

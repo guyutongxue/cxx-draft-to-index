@@ -52,7 +52,46 @@ export class Token implements IToken {
 // Lexer
 // ============================================================
 
-const PUNCT_CHARS = new Set("{}()[]<>;:?.~!+-*/%^&|=,".split(""));
+type StringToCharArray<Str extends string> =
+  Str extends `${infer First}${infer Rest}`
+    ? [First, ...StringToCharArray<Rest>]
+    : [];
+
+const MULTICHAR_PUNCTS = [
+  "...",
+  "<=>",
+  "<<=",
+  "->",
+  "::",
+  "[:",
+  ":]",
+  "^^",
+  "&&",
+  "+=",
+  "-=",
+  "*=",
+  "/=",
+  "%=",
+  "&=",
+  "|=",
+  "^=",
+  "==",
+  "!=",
+  "<=",
+  ">=",
+  "||",
+  "<<",
+  "++",
+  "--",
+] as const;
+
+const SINGLECHAR_PUNCTS = "{}()[]<>;:?.~!+-*/%^&|=," as const;
+
+export type Punctuation =
+  | (typeof MULTICHAR_PUNCTS)[number]
+  | StringToCharArray<typeof SINGLECHAR_PUNCTS>[number];
+
+const SINGLECHAR_PUNCTS_SET = new Set(SINGLECHAR_PUNCTS.split(""));
 
 function hasOddTrailingBackslashes(value: string): boolean {
   let count = 0;
@@ -230,33 +269,7 @@ export class Lexer {
     // We omit >> intentionally since it's commonly used as adjacent
     // enclosing template param/args. The parsing of `operator>>` and
     // `operator>>=` is special-cased in the parser.
-    for (const value of [
-      "...",
-      "<=>",
-      "<<=",
-      "->",
-      "::",
-      "[:",
-      ":]",
-      "^^",
-      "&&",
-      "+=",
-      "-=",
-      "*=",
-      "/=",
-      "%=",
-      "&=",
-      "|=",
-      "^=",
-      "==",
-      "!=",
-      "<=",
-      ">=",
-      "||",
-      "<<",
-      "++",
-      "--",
-    ]) {
+    for (const value of MULTICHAR_PUNCTS) {
       if (this.getN(value.length) === value) {
         for (let i = 0; i < value.length; i++) {
           this.advance();
@@ -266,7 +279,7 @@ export class Lexer {
     }
 
     // Single-char punctuation
-    if (PUNCT_CHARS.has(c)) {
+    if (SINGLECHAR_PUNCTS_SET.has(c)) {
       this.advance();
       return new Token({ type: TokenType.Punct, value: c, loc });
     }
