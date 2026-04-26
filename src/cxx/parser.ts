@@ -176,7 +176,7 @@ interface DeclarationSpecifierInfo {
 }
 
 interface DeclaratorInfo {
-  idExpr: IdExpressionInfo;
+  idExpr: IdExpressionInfo | null;
   // no declspec
   raw: string;
   /** type-id, e.g. `int (*) ()` */
@@ -224,7 +224,7 @@ type DeclaratorSurrounding =
     };
 
 interface PartialDeclaratorInfo {
-  idExpr: IdExpressionInfo;
+  idExpr: IdExpressionInfo | null;
   surrounding: DeclaratorSurrounding[];
 }
 
@@ -710,6 +710,7 @@ export class Parser {
     }
     for (const declarator of declaratorList.declarators) {
       const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
+      this.assert(declarator.idExpr, `Declarator must have an id-expression`);
       const idLastPart = declarator.idExpr.parts.at(-1);
       const partialSpecialization = templateInfo && idLastPart?.templateArgs;
       if (declarator.function) {
@@ -1041,6 +1042,7 @@ export class Parser {
       }
       const declarator = this.parseDeclarator({
         declSpecifier,
+        abstract: false,
       });
       let initializer: string | null = null;
       if (declarator.function) {
@@ -1114,11 +1116,16 @@ export class Parser {
 
   private parseDeclarator({
     declSpecifier,
+    abstract,
   }: {
     declSpecifier: DeclarationSpecifierInfo;
+    abstract: boolean;
   }): DeclaratorInfo {
     const startLoc = this.tok.loc;
-    const { idExpr, surrounding } = this.parseDeclaratorImpl(0);
+    const { idExpr, surrounding } = this.parseDeclaratorImpl({
+      abstract,
+      depth: 0,
+    });
     const endLoc = this.tok.loc;
     let typeInfo = "";
     let direction: "postfix" | "prefix" = "postfix";
@@ -1183,7 +1190,13 @@ export class Parser {
     };
   }
 
-  private parseDeclaratorImpl(depth: number): PartialDeclaratorInfo {
+  private parseDeclaratorImpl({
+    abstract,
+    depth,
+  }: {
+    abstract: boolean;
+    depth: number;
+  }): PartialDeclaratorInfo {
     const ptrToMemberPrefix = this.tryReadPointerToMemberDeclaratorPrefix();
     if (ptrToMemberPrefix) {
       this.unimplemented("pointer-to-member declarator");
@@ -1200,23 +1213,36 @@ export class Parser {
       });
       this.adv();
     }
-    const { idExpr, surrounding } = this.parseDirectDeclarator(depth);
+    const { idExpr, surrounding } = this.parseDirectDeclarator({
+      abstract,
+      depth,
+    });
     surrounding.push(...prefix.toReversed());
     return { idExpr, surrounding };
   }
 
-  private parseDirectDeclarator(depth: number): PartialDeclaratorInfo {
-    let idExpr: IdExpressionInfo;
+  private parseDirectDeclarator({
+    abstract,
+    depth,
+  }: {
+    abstract: boolean;
+    depth: number;
+  }): PartialDeclaratorInfo {
+    let idExpr: IdExpressionInfo | null = null;
     const surrounding: DeclaratorSurrounding[] = [];
     if (this.isP("(")) {
       this.adv(); // (
-      const inner = this.parseDeclaratorImpl(depth + 1);
+      const inner = this.parseDeclaratorImpl({ abstract, depth: depth + 1 });
       this.assertP(")");
       this.adv(); // )
       idExpr = inner.idExpr;
       surrounding.push(...inner.surrounding);
     } else {
-      idExpr = this.readIdExpression();
+      if (abstract) {
+        idExpr = this.tryReadIdExpression();
+      } else {
+        idExpr = this.readIdExpression();
+      }
       this.tryParseAttribute();
     }
     while (this.isP("[") || this.isP("(")) {
@@ -1701,6 +1727,10 @@ export class Parser {
 
   // ---- Function ----
 
+  // private parseParameterDeclaration(): ParameterInfo {
+
+  // }
+
   private parseParameterAndQualifiers(): FunctionInfo {
     this.assertP("(");
     this.adv(); // (
@@ -1908,10 +1938,7 @@ export class Parser {
 
     this.assertP("=");
     this.adv(); // =
-    // this.parseConstraintExpression();
-    // LOOSE PARSE because <execution> said:
-    // concept __forwarding_query = forwarding_query(T{})
-    // this is an expression bro, we don't have parseExpression now
+    // LOOSE PARSE: we might not implement the parsing of logic-or-expression
     this.skipBalancedTokensUntilPunct([";"], true);
     this.assertP(";");
     this.adv(); // ;
@@ -2177,7 +2204,7 @@ export class Parser {
    * TODO The argument of nested-name-specifier might point to the main template or partial specialization; we need to:
    * - resolve the template parameter name and corresponding argument
    * - if argument literally equals to the parameter, then it should refer to the primary template; otherwise, this refers to a partial specialization
-   * 
+   *
    * @ref [expr.prim.id.qual]
    * (4.5) If a nested-name-specifier N is declarative and has a simple-template-id with a template argument list A that involves a template parameter, let T be the template nominated by N without A. T shall be a class template.
    * (4.5.1) If A is the template argument list ([temp.arg]) of the corresponding template-head H ([temp.mem]), N designates the primary template of T; H shall be equivalent to the template-head of T ([temp.over.link]).
