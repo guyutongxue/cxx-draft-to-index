@@ -41,6 +41,10 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
     const resolved = resolveLaTeXInText(line);
     const directive = /^#\s*(\w+)(.*)$/.exec(resolved);
     if (directive) {
+      const raw = resolved
+        .replace(/\s+/g, " ")
+        .replace(/\/\/.*/gm, " ")
+        .trim();
       // preprocessor directive
       const [, directiveName, rest] = directive;
       if (directiveName === "define") {
@@ -62,7 +66,7 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             namespace,
             name,
             kind: "functionLikeMacro",
-            raw: resolved,
+            raw,
             parameters,
             languageLinkage: null,
           });
@@ -72,7 +76,7 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             namespace,
             name,
             kind: "macro",
-            raw: resolved,
+            raw,
             languageLinkage: null,
           });
         }

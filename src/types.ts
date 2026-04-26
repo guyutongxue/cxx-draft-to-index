@@ -8,6 +8,18 @@ export interface SymbolEntryBase {
   languageLinkage: "C" | "C++" | null;
 }
 
+export interface Parameter {
+  name: string | null;
+  type: string;
+  defaultArg: string | null;
+  raw: string;
+  pack: boolean;
+}
+
+export interface TemplateParameter extends Parameter {
+  kind: "type" | "constant" | "template";
+}
+
 export interface MacroSymbolEntry extends SymbolEntryBase {
   kind: "macro";
 }
@@ -57,7 +69,8 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
   friend: boolean;
   returnType: string; // "" for ctor and conversion
   isTrailingReturnType: boolean;
-  parameters: string[]; // raw parameter strings for now
+  parameters: Parameter[];
+  variadic: boolean;
   // void foo() requires <constraints>;
   signatureRequires: string | null;
 }
@@ -100,12 +113,12 @@ export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
 export interface DeductionGuideSymbolEntry
   extends SymbolEntryBase, Partial<TemplateInfo> {
   kind: "deductionGuide";
-  parameters: string[];
+  parameters: Parameter[];
   targetType: string;
 }
 
 type TemplateInfo = {
-  templateParams: string[]; // raw strings for now
+  templateParams: TemplateParameter[]; // raw strings for now
   // template <params...> requires <constraints> <decl>
   templateRequires?: string | null;
 };

@@ -5,6 +5,7 @@ import type {
   SymbolEntry,
   SymbolEntryBase,
   SymbolKind,
+  TemplateParameter,
 } from "../types";
 import { resolveLatex } from "./latex";
 import { Lexer, Location, Punctuation, Token, TokenType } from "./lexer";
@@ -25,6 +26,7 @@ interface TemplateParameterInfo {
   pack: boolean;
   defaultArg: string | null;
   raw: string;
+  typeInfo: string | null;
 }
 
 interface ParameterInfo {
@@ -33,6 +35,7 @@ interface ParameterInfo {
   name: string | null;
   pack: boolean;
   defaultArg: ExpressionInfo | null;
+  typeInfo: string;
 }
 
 interface TemplateInfo {
@@ -606,6 +609,7 @@ export class Parser {
           }),
         );
       } else if (templateInfo) {
+        const templateParams = this.buildTemplateParams(templateInfo);
         if (templateInfo.fullSpecialization) {
           this.assert(
             classSpecifier.templateArgs,
@@ -626,7 +630,7 @@ export class Parser {
               name: this.nameWithoutTemplateArg(classSpecifier.id),
               templateKind: "class",
               raw: this.lexer.range(startLoc, this.tok.loc),
-              templateParams: templateInfo.templateParameters.map((p) => p.raw),
+              templateParams,
               templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
               members: classSpecifier.members,
             }),
@@ -641,9 +645,7 @@ export class Parser {
               this.buildSymbol("classTemplate", {
                 name: classSpecifier.id.name,
                 raw: this.lexer.range(startLoc, this.tok.loc),
-                templateParams: templateInfo.templateParameters.map(
-                  (p) => p.raw,
-                ),
+                templateParams,
                 base: classSpecifier.baseSpecifiers.map((b) => b.raw),
                 members: classSpecifier.members,
               }),
@@ -696,6 +698,13 @@ export class Parser {
             operator = lastPart.value;
             break;
         }
+        const parameters = declarator.function.parameters.map((p) => ({
+          raw: p.raw,
+          name: p.name,
+          type: p.typeInfo,
+          defaultArg: p.defaultArg?.raw ?? null,
+          pack: p.pack,
+        }));
         const returnType =
           declarator.function.trailingReturnType ?? declSpecifier.typeString;
         const isTrailingReturnType = !!declarator.function.trailingReturnType;
@@ -703,6 +712,7 @@ export class Parser {
           typeof declSpecifier.explicitSpecifier === "boolean"
             ? declSpecifier.explicitSpecifier
             : declSpecifier.explicitSpecifier.raw;
+        const variadic = declarator.function.variadic;
         const friend = declSpecifier.declSpecifiers.includes("friend");
         if (
           declSpecifier.typeSpecifiers.length === 0 &&
@@ -713,11 +723,11 @@ export class Parser {
             this.buildSymbol("deductionGuide", {
               name: declarator.idExpr.name,
               raw: this.lexer.range(startLoc, this.tok.loc),
-              parameters: declarator.function.parameters.map((p) => p.raw),
+              parameters,
               targetType: declarator.function.trailingReturnType,
-              templateParams: templateInfo?.templateParameters.map(
-                (p) => p.raw,
-              ),
+              templateParams: templateInfo
+                ? this.buildTemplateParams(templateInfo)
+                : void 0,
               templateRequires: templateInfo?.requiresClause,
             }),
           );
@@ -756,16 +766,15 @@ export class Parser {
               this.buildSymbol("functionTemplate", {
                 name: declarator.idExpr.name,
                 operator,
-                parameters: declarator.function.parameters.map((p) => p.raw),
+                parameters,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 returnType,
                 isTrailingReturnType,
                 constexpr,
                 explicit,
                 friend,
-                templateParams: templateInfo.templateParameters.map(
-                  (p) => p.raw,
-                ),
+                variadic,
+                templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
                 signatureRequires: declarator.function.constraint?.raw || null,
               }),
@@ -783,13 +792,14 @@ export class Parser {
             this.buildSymbol("function", {
               name: declarator.idExpr.name,
               operator,
-              parameters: declarator.function.parameters.map((p) => p.raw),
+              parameters,
               raw: declSpecifier.raw + " " + declarator.raw + ";",
               returnType,
               isTrailingReturnType,
               constexpr,
               explicit,
               friend,
+              variadic,
               signatureRequires: null,
             }),
           );
@@ -824,9 +834,7 @@ export class Parser {
               this.buildSymbol("partialTemplateSpecialization", {
                 name: this.nameWithoutTemplateArg(declarator.idExpr),
                 templateKind: "variable",
-                templateParams: templateInfo.templateParameters.map(
-                  (p) => p.raw,
-                ),
+                templateParams: this.buildTemplateParams(templateInfo),
                 templateArgs: partialSpecialization.map((a) => a.raw),
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 members: null,
@@ -842,9 +850,8 @@ export class Parser {
             symbols.push(
               this.buildSymbol("variableTemplate", {
                 ...entry,
-                templateParams: templateInfo.templateParameters.map(
-                  (p) => p.raw,
-                ),
+                templateParams: this.buildTemplateParams(templateInfo),
+                templateRequires: templateInfo.requiresClause,
               }),
             );
           }
@@ -1106,7 +1113,7 @@ export class Parser {
     });
     const endLoc = this.tok.loc;
     let typeInfo = "";
-    let direction: "postfix" | "prefix" = "postfix";
+    let direction: "postfix" | "prefix" | null = null;
     for (const s of surrounding) {
       if (["*", "&", "&&"].includes(s.kind)) {
         direction = "prefix";
@@ -1118,8 +1125,7 @@ export class Parser {
       } else if (s.kind === "pointerToMember") {
         direction = "prefix";
         typeInfo = `${s.raw} ${typeInfo}`;
-      }
-      {
+      } else {
         if (direction === "prefix") {
           typeInfo = `(${typeInfo})`;
           direction = "postfix";
@@ -1422,7 +1428,7 @@ export class Parser {
             name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             syntax: "using",
-            templateParams: templateInfo.templateParameters.map((p) => p.raw),
+            templateParams: this.buildTemplateParams(templateInfo),
           }),
         ];
       } else {
@@ -1473,6 +1479,7 @@ export class Parser {
     let kind: TemplateParameterInfo["kind"];
     let pack = false;
     let defaultArg: string | null = null;
+    let typeInfo: string | null = null;
     const readNameAndDefaultArg = () => {
       if (this.isP("...")) {
         pack = true;
@@ -1518,6 +1525,7 @@ export class Parser {
             idExpression.parts[0].conceptName
           ) {
             kind = "type";
+            typeInfo = idExpression.name;
             readNameAndDefaultArg();
             transaction.commit();
             break;
@@ -1528,6 +1536,7 @@ export class Parser {
         name = paramInfo.name;
         pack = paramInfo.pack;
         defaultArg = paramInfo.defaultArg?.raw || null;
+        typeInfo = paramInfo.typeInfo;
       }
     } while (false);
     const endLoc = this.tok.loc;
@@ -1537,6 +1546,7 @@ export class Parser {
       pack,
       defaultArg,
       raw: this.lexer.range(startLoc, endLoc),
+      typeInfo,
     };
   }
 
@@ -1867,6 +1877,7 @@ export class Parser {
       name,
       pack: declarator.pack,
       defaultArg,
+      typeInfo: declarator.typeInfo,
     };
   }
 
@@ -2086,7 +2097,7 @@ export class Parser {
       this.buildSymbol("concept", {
         name,
         raw: this.lexer.range(startLoc, this.tok.loc),
-        templateParams: templateInfo.templateParameters.map((p) => p.raw),
+        templateParams: this.buildTemplateParams(templateInfo),
       }),
     ];
   }
@@ -2542,5 +2553,16 @@ export class Parser {
       // TODO inlineUnspecifiedNamespace
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as SymbolEntry;
+  }
+
+  private buildTemplateParams(params: TemplateInfo): TemplateParameter[] {
+    return params.templateParameters.map((p) => ({
+      raw: p.raw,
+      kind: p.kind,
+      name: p.name,
+      defaultArg: p.defaultArg,
+      pack: p.pack,
+      type: p.typeInfo ?? "",
+    }));
   }
 }

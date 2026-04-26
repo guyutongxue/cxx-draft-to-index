@@ -307,7 +307,8 @@ export class Lexer {
     return resolveLaTeXInText(
       this.src
         .slice(startLoc.offset, endLoc.offset)
-        .replace(/\/\/.*/gm, "")
+        .replace(/\s+/g, " ")
+        .replace(/\/\/.*/gm, " ")
         .trim(),
     );
   }
