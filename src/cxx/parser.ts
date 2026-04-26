@@ -20,11 +20,16 @@ interface AttributeInfo {
 }
 
 interface TemplateParameterInfo {
+  kind: "constant" | "type" | "template";
+  name: string | null;
+  pack: boolean;
+  defaultArg: string | null;
   raw: string;
 }
 
 interface ParameterInfo {
   raw: string;
+  declSpecifier: DeclarationSpecifierInfo;
   name: string | null;
   pack: boolean;
   defaultArg: ExpressionInfo | null;
@@ -116,6 +121,8 @@ interface IdExpressionPartInfo {
    */
   value: string | null;
   templateArgs: TemplateArgumentInfo[] | null;
+  // The code is using @\libconcept{blah}@, indicate this is a concept-name
+  conceptName: boolean;
 }
 
 /**
@@ -166,6 +173,7 @@ interface CvQualifierSet {
 
 interface DeclarationSpecifierInfo {
   raw: string;
+  constraint: string | null;
   typeSpecifiers: string[];
   // cv-qualifiers type-specifiers|class-name|enum-name
   typeString: string;
@@ -319,7 +327,7 @@ export class Parser {
     return tok.type === TokenType.LatexEscape ? resolveLatex(tok) : tok.value;
   }
 
-  // ---- Balanced skip helpers ----
+  // MARK: ---- Balanced skip helpers ----
 
   private skipBalancedBrackets(open: "(", close: ")"): Token[];
   private skipBalancedBrackets(open: "{", close: "}"): Token[];
@@ -382,50 +390,6 @@ export class Parser {
     return tokens;
   }
 
-  private parseTemplateParams(): TemplateParameterInfo[] {
-    this.consumeP("<");
-    const parameters: TemplateParameterInfo[] = [];
-    // LOOSE PARSE: here might be a:
-    // - type template parameter:
-    //   `class|typename|<constraint> [...|<id> [= <typeid>]]`
-    //   which: <constraints> cannot be disambiguate from NTTP without sema
-    // - template template parameter:
-    //   `template <parameters> [concept|class|typename|auto] [...|<id> [= <typeid>]]`
-    // - NTTP: a parameter declaration
-    // damn its too complex and we should skip!
-    while (true) {
-      const startLoc = this.tok.loc;
-      this.skipBalancedTokensUntilPunct([",", ">"], true);
-      const endLoc = this.tok.loc;
-      parameters.push({ raw: this.lexer.range(startLoc, endLoc) });
-      if (this.isP(">")) {
-        this.adv();
-        break;
-      }
-      this.consumeP(",");
-    }
-    return parameters;
-  }
-
-  private parseTemplateArgs(): TemplateArgumentInfo[] {
-    this.consumeP("<");
-    const args: TemplateArgumentInfo[] = [];
-    // LOOSE PARSE: same as template parameter, we cannot figure out
-    // its detailed structure (should be a type-id, template-id, or constant expression?)
-    while (true) {
-      const startLoc = this.tok.loc;
-      this.skipBalancedTokensUntilPunct([",", ">"], true);
-      const endLoc = this.tok.loc;
-      args.push({ raw: this.lexer.range(startLoc, endLoc) });
-      if (this.isP(">")) {
-        this.consumeP(">");
-        break;
-      }
-      this.consumeP(",");
-    }
-    return args;
-  }
-
   private isAttribute(): boolean {
     return this.isId("alignas") || (this.isP("[") && this.nextTok().isP("["));
   }
@@ -458,7 +422,7 @@ export class Parser {
     this.die(`Unimplemented parser feature ${name || ""}`);
   }
 
-  // ---- Top-level ----
+  // MARK: ---- Top-level ----
 
   parseTopLevel(): SymbolEntry[] {
     const symbols: SymbolEntry[] = [];
@@ -481,7 +445,7 @@ export class Parser {
     return symbols;
   }
 
-  // ---- Declaration ----
+  // MARK: ---- Declaration ----
 
   private parseExternalDeclaration(): SymbolEntry[] {
     const startLoc = this.tok.loc;
@@ -913,6 +877,7 @@ export class Parser {
     // decl-specifier* attr-specifier*
     let classSpecifier: ClassSpecifierInfo | null = null;
     let enumSpecifier: EnumSpecifierInfo | null = null;
+    let constraint: string | null = null;
     const typeSpecifiers: string[] = [];
     const cvQualifiers = {
       const: false,
@@ -931,7 +896,11 @@ export class Parser {
       });
       if (!notAType) {
         const idExpression = this.readIdExpression();
-        typeSpecifiers.push(idExpression.name);
+        if (idExpression.parts.at(-1)?.conceptName) {
+          constraint = idExpression.name;
+        } else {
+          typeSpecifiers.push(idExpression.name);
+        }
       }
       return { notAType };
     };
@@ -983,7 +952,7 @@ export class Parser {
       } else if (id === "auto") {
         this.assert(
           typeSpecifiers.length < 2,
-          `in a decl-specifier, only "auto" and "Constr auto" is allowed`,
+          `in a decl-specifier, only "auto" and "Constraint auto" is allowed`,
         );
         typeSpecifiers.push("auto");
         this.adv();
@@ -1016,6 +985,7 @@ export class Parser {
     const typeString = [
       ...(cvQualifiers.const ? ["const"] : []),
       ...(cvQualifiers.volatile ? ["volatile"] : []),
+      ...(constraint ? [constraint] : []),
       ...typeSpecifiers,
       ...(classSpecifier ? [classSpecifier.id.name] : []),
       ...(enumSpecifier?.id ? [enumSpecifier.id.name] : []),
@@ -1028,6 +998,7 @@ export class Parser {
       explicitSpecifier: explicit,
       classSpecifier,
       enumSpecifier,
+      constraint,
       raw: this.lexer.range(startLoc, this.tok.loc),
     };
   }
@@ -1147,7 +1118,8 @@ export class Parser {
       } else if (s.kind === "pointerToMember") {
         direction = "prefix";
         typeInfo = `${s.raw} ${typeInfo}`;
-      } {
+      }
+      {
         if (direction === "prefix") {
           typeInfo = `(${typeInfo})`;
           direction = "postfix";
@@ -1306,7 +1278,7 @@ export class Parser {
     return { pack, idExpr, surrounding };
   }
 
-  // ---- Namespace ----
+  // MARK: ---- Namespace ----
 
   private parseNamespace({ inline }: { inline: boolean }): SymbolEntry[] {
     const symbols: SymbolEntry[] = [];
@@ -1370,7 +1342,7 @@ export class Parser {
     return symbols;
   }
 
-  // ---- Using ----
+  // MARK: ---- Using ----
 
   private parseUsingDirectiveOrDeclaration({
     templateInfo,
@@ -1485,7 +1457,122 @@ export class Parser {
     return symbols;
   }
 
-  // ---- Template ----
+  // MARK: ---- Template ----
+
+  private parseTemplateParameter(): TemplateParameterInfo {
+    // here might be a:
+    // - NTTP: a parameter declaration
+    // - template template parameter:
+    //   `template <parameters> [concept|class|typename|auto] [...|<id> [= <typeid>]]`
+    // - type template parameter:
+    //   `class|typename|<constraint> [...|<id> [= <typeid>]]`
+    // since `<constraints> [...|<id> [= <typeid>]]` has same syntax with NTTP so
+    // we just call `parseParameterDeclaration` and it might work lol
+    const startLoc = this.tok.loc;
+    let name: string | null = null;
+    let kind: TemplateParameterInfo["kind"];
+    let pack = false;
+    let defaultArg: string | null = null;
+    const readNameAndDefaultArg = () => {
+      if (this.isP("...")) {
+        pack = true;
+        this.consumeP("...");
+      }
+      if (this.isIdentifierOrLaTeX()) {
+        name = this.resolved(this.tok);
+        this.adv();
+      }
+      if (!pack && this.isP("=")) {
+        this.consumeP("=");
+        const startLoc = this.tok.loc;
+        this.skipBalancedTokensUntilPunct([",", ">"], true);
+        const endLoc = this.tok.loc;
+        defaultArg = this.lexer.range(startLoc, endLoc);
+      }
+    };
+    do {
+      if (this.isId("template")) {
+        kind = "template";
+        this.consumeId("template");
+        this.parseTemplateParameterList();
+        this.assert(
+          this.isId("class") ||
+            this.isId("typename") ||
+            this.isId("concept") ||
+            this.isId("auto"),
+          "should be one of `class`, `typename`, `concept`, or `auto` after template-head in tt-parameter",
+        );
+        this.adv();
+        readNameAndDefaultArg();
+      } else if (this.isId("class") || this.isId("typename")) {
+        kind = "type";
+        this.adv();
+        readNameAndDefaultArg();
+      } else {
+        {
+          using transaction = this.createRevertTransaction();
+          const idExpression = this.tryReadIdExpression();
+          if (
+            idExpression &&
+            idExpression.parts.length === 1 &&
+            idExpression.parts[0].conceptName
+          ) {
+            kind = "type";
+            readNameAndDefaultArg();
+            transaction.commit();
+            break;
+          }
+        }
+        const paramInfo = this.parseParameterDeclaration();
+        kind = "constant";
+        name = paramInfo.name;
+        pack = paramInfo.pack;
+        defaultArg = paramInfo.defaultArg?.raw || null;
+      }
+    } while (false);
+    const endLoc = this.tok.loc;
+    return {
+      kind,
+      name,
+      pack,
+      defaultArg,
+      raw: this.lexer.range(startLoc, endLoc),
+    };
+  }
+
+  private parseTemplateParameterList(): TemplateParameterInfo[] {
+    this.consumeP("<");
+    const parameters: TemplateParameterInfo[] = [];
+    while (!this.isP(">")) {
+      const parameter = this.parseTemplateParameter();
+      parameters.push(parameter);
+      if (this.isP(">")) {
+        break;
+      }
+      this.consumeP(",");
+    }
+    this.consumeP(">");
+    return parameters;
+  }
+
+  private parseTemplateArgs(): TemplateArgumentInfo[] {
+    this.consumeP("<");
+    const args: TemplateArgumentInfo[] = [];
+    // LOOSE PARSE: we cannot figure out its detailed structure
+    // (should be a type-id, template-id, or constant expression?)
+    while (!this.isP(">")) {
+      const startLoc = this.tok.loc;
+      this.skipBalancedTokensUntilPunct([",", ">"], true);
+      const endLoc = this.tok.loc;
+      args.push({ raw: this.lexer.range(startLoc, endLoc) });
+      if (this.isP(">")) {
+        break;
+      }
+      this.consumeP(",");
+    }
+    this.consumeP(">");
+    return args;
+  }
 
   private parseTemplateDeclarationOrSpecialization({
     startLoc,
@@ -1500,7 +1587,7 @@ export class Parser {
     let requiresClause: string | null = null;
     let fullSpecialization = false;
     this.consumeId("template");
-    const params = this.parseTemplateParams();
+    const params = this.parseTemplateParameterList();
     if (params.length === 0) {
       fullSpecialization = true;
     }
@@ -1566,7 +1653,7 @@ export class Parser {
     });
   }
 
-  // ---- Class / struct / union ----
+  // MARK: ---- Class ----
 
   private parseClassSpecifier({
     previousSpecifiers,
@@ -1752,7 +1839,16 @@ export class Parser {
       // default parameter, skip initializer
       this.consumeP("=");
       const startLoc = this.tok.loc;
-      this.skipBalancedTokensUntilPunct(["...", ",", ")"], true);
+      // LOOSE PARSE: expression
+      this.skipBalancedTokensUntilPunct(
+        [
+          "...", // variadic function mark
+          ",", // start of next parameter
+          ")", // end-of parameter list
+          ">", // end of template-parameter list
+        ],
+        true,
+      );
       const endLoc = this.tok.loc;
       defaultArg = { raw: this.lexer.range(startLoc, endLoc) };
     }
@@ -1767,6 +1863,7 @@ export class Parser {
     }
     return {
       raw: this.lexer.range(startLoc, endLoc),
+      declSpecifier: declSpec,
       name,
       pack: declarator.pack,
       defaultArg,
@@ -2086,6 +2183,7 @@ export class Parser {
             name: "*",
             value: null,
             templateArgs: null,
+            conceptName: false,
           });
           return { name, fromGlobal, parts };
         }
@@ -2118,6 +2216,7 @@ export class Parser {
     let value: string | null = null;
     let kind: IdPartKind;
     let templateArgs: TemplateArgumentInfo[] | null = null;
+    let conceptName = false;
     if (this.isId("decltype")) {
       this.consumeId("decltype");
       const startLoc = this.tok.loc;
@@ -2191,6 +2290,7 @@ export class Parser {
         name += " " + value;
       }
     } else if (this.isIdentifierOrLaTeX()) {
+      conceptName = this.tok.value.includes("\\libconcept");
       value = this.resolved(this.tok);
       name += value;
       this.adv();
@@ -2215,7 +2315,7 @@ export class Parser {
       const endLoc = this.tok.loc;
       name += this.lexer.range(startLoc, endLoc);
     }
-    return { kind, name, value, templateArgs };
+    return { kind, name, value, templateArgs, conceptName };
   }
 
   /**
