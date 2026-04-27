@@ -1,3 +1,5 @@
+import { Codeblock } from "./latex";
+
 export interface NamespaceInfo {
   name: string | null; // null for anonymous namespace
   inline: boolean;
@@ -228,8 +230,7 @@ export type ExtractKind<
     : never
   : never;
 
-export interface PreprocessedCodeblock {
-  header: string;
+export interface PreprocessedCodeblock extends Codeblock {
   preprocessedCode: string;
   macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
   includes: string[];

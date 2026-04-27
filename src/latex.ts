@@ -1,10 +1,13 @@
 import { Glob } from "bun";
 import { join, resolve } from "node:path";
 
-export interface HeaderSynopsis {
+export interface Codeblock {
+  filename: string;
   header: string;
+  isSynopsis: boolean;
+  sectionTitle: string;
+  sectionId: string;
   code: string;
-  sourceFile: string;
 }
 
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
@@ -79,7 +82,7 @@ const PATCHES: Record<string, [string, string][]> = {
     [
       `    static constexpr array<result_type, @\\exposid{array-size>}@ round_consts;`,
       `    static constexpr array<result_type, @\\exposid{array-size}@> round_consts;`,
-    ]
+    ],
   ],
   "ranges.tex": [
     [
@@ -90,30 +93,30 @@ const PATCHES: Record<string, [string, string][]> = {
     [
       `    @\\exposconcept{tuple-like}@<T> && N < tuple_size_v<T> &&`,
       `    @\\exposconcept{tuple-like}@<T> && (N < tuple_size_v<T>) &&`,
-    ]
+    ],
   ],
   "exec.tex": [
     [
       `    void set_stopped() && noexcept\n`,
       `    void set_stopped() && noexcept {\n`,
-    ]
+    ],
   ],
   "containers.tex": [
     [
       `  template<ranges::@\\libconcept{input_range}@ R, class Compare = less<@\\exposid{range-key-type}@<R>,`,
-      `  template<ranges::@\\libconcept{input_range}@ R, class Compare = less<@\\exposid{range-key-type}@<R>>,`
-    ]
+      `  template<ranges::@\\libconcept{input_range}@ R, class Compare = less<@\\exposid{range-key-type}@<R>>,`,
+    ],
   ],
   "threads.tex": [
     [
       `    constexpr @\\placeholdernc{floating-poin-type}@t fetch_min(@\\placeholdernc{floating-point-type}@,`,
-      `    constexpr @\\placeholdernc{floating-point-type}@ fetch_min(@\\placeholdernc{floating-point-type}@,`
+      `    constexpr @\\placeholdernc{floating-point-type}@ fetch_min(@\\placeholdernc{floating-point-type}@,`,
     ],
     [
       `      bool wait_until(Lock& lock, chrono::time_point<Clock, Duration abs_time,`,
-      `      bool wait_until(Lock& lock, chrono::time_point<Clock, Duration> abs_time,`
-    ]
-  ]
+      `      bool wait_until(Lock& lock, chrono::time_point<Clock, Duration> abs_time,`,
+    ],
+  ],
 };
 
 const REQUIRED_MISSING_INCLUDES: Record<string, string[]> = {
@@ -166,11 +169,11 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
 
 export function extractHeaderSynopses(
   texFiles: Map<string, string>,
-): HeaderSynopsis[] {
-  const results: HeaderSynopsis[] = [];
+): Codeblock[] {
+  const results: Codeblock[] = [];
 
   for (const [fileName, content] of texFiles) {
-    results.push(...extractFromSingleFile(fileName, content));
+    results.push(...new LaTeXFile(fileName, content).extract());
   }
 
   return results;
@@ -184,85 +187,125 @@ function isClassDefinitionCodeblock(code: string): boolean {
   return hasStdNamespace && hasClassLikeDefinition;
 }
 
-function extractFromSingleFile(
-  fileName: string,
-  content: string,
-): HeaderSynopsis[] {
-  const results: HeaderSynopsis[] = [];
-  const lines = content.split("\n");
-
-  let i = 0;
-  while (i < lines.length) {
-    const headerName = isHeaderMarker(lines[i]);
-    if (!headerName) {
-      i++;
-      continue;
-    }
-    let hasSynopsis = false;
-    while (true) {
-      let code: string | null;
-      [code, i] = findNextCodeblockInThisHeader(fileName, lines, i + 1);
-      if (code === null) {
-        break;
-      }
-      if (hasSynopsis && !isClassDefinitionCodeblock(code)) {
-        continue;
-      }
-      if (!hasSynopsis) {
-        hasSynopsis = true;
-        // add missing #include to the header synopsis
-        if (REQUIRED_MISSING_INCLUDES[headerName]) {
-          code =
-            REQUIRED_MISSING_INCLUDES[headerName]
-              .map((inc) => `#include <${inc}>`)
-              .join("\n") +
-            "\n" +
-            code;
-        }
-      }
-      results.push({
-        header: headerName,
-        code,
-        sourceFile: fileName,
-      });
-    }
-  }
-  return results;
-}
-
 function isHeaderMarker(line: string): string | null {
   return line.match(/\\(?:indexheader|libheaderdef)\{([^}]+)\}/)?.[1] ?? null;
 }
 
-function findNextCodeblockInThisHeader(
-  fileName: string,
-  lines: string[],
-  startFrom: number,
-): [content: string | null, endIdx: number] {
-  let startLine: number | null = null;
-  for (let i = startFrom; i < lines.length; i++) {
-    if (isHeaderMarker(lines[i])) {
-      if (startLine) {
-        throw new Error(`Unclosed codeblock starting at ${fileName}:${i + 1}`);
-      }
-      return [null, i];
+class LaTeXFile {
+  readonly lines: string[];
+  lineIdx = 0;
+  sectionTitle = "";
+  sectionId = "";
+
+  private get line() {
+    return this.lines[this.lineIdx];
+  }
+
+  constructor(
+    private filename: string,
+    content: string,
+  ) {
+    this.lines = content.split("\n");
+  }
+
+  advLine() {
+    this.lineIdx++;
+    const match = /\\rSec\d\[([^\]]+)\]\{(.+)\}/.exec(this.line);
+    if (match) {
+      this.sectionId = match[1];
+      this.sectionTitle = match[2].replace(/\\\w+\{|\}/g, "").trim();
     }
-    const trimmed = lines[i].trim();
-    if (startLine === null) {
-      if (
-        trimmed.startsWith("\\begin{codeblock}") ||
-        trimmed.startsWith("\\begin{codeblockdigitsep}")
-      ) {
-        startLine = i;
+  }
+
+  extract(): Codeblock[] {
+    const results: Codeblock[] = [];
+    while (this.lineIdx < this.lines.length) {
+      const headerName = this.findNextHeaderMarker();
+      if (headerName === null) {
+        break;
       }
-    } else {
+      this.advLine();
+      let isHeaderSyn = true;
+      while (true) {
+        const code = this.findNextCodeblockInThisHeader();
+        if (code === null) {
+          break;
+        }
+        if (!isHeaderSyn && !isClassDefinitionCodeblock(code)) {
+          continue;
+        }
+        results.push({
+          header: headerName,
+          isSynopsis: isHeaderSyn,
+          code: this.prepareSynopsisCode(headerName, code, isHeaderSyn),
+          filename: this.filename,
+          sectionTitle: this.sectionTitle,
+          sectionId: this.sectionId,
+        });
+        isHeaderSyn = false;
+      }
+    }
+    return results;
+  }
+
+  private findNextHeaderMarker(): string | null {
+    while (this.lineIdx < this.lines.length) {
+      const headerName = isHeaderMarker(this.line);
+      if (headerName) {
+        return headerName;
+      }
+      this.advLine();
+    }
+    return null;
+  }
+
+  private prepareSynopsisCode(
+    headerName: string,
+    code: string,
+    isHeaderSyn: boolean,
+  ): string {
+    if (!isHeaderSyn) {
+      return code;
+    }
+    const missingIncludes = REQUIRED_MISSING_INCLUDES[headerName];
+    if (!missingIncludes) {
+      return code;
+    }
+    return `${missingIncludes.map((inc) => `#include <${inc}>`).join("\n")}\n${code}`;
+  }
+
+  private findNextCodeblockInThisHeader(): string | null {
+    let codeblockStartLine: number | null = null;
+    for (; this.lineIdx < this.lines.length; this.advLine()) {
+      if (isHeaderMarker(this.line)) {
+        if (codeblockStartLine !== null) {
+          throw new Error(
+            `Unclosed codeblock starting at ${this.filename}:${this.lineIdx + 1}`,
+          );
+        }
+        return null;
+      }
+
+      const trimmed = this.line.trim();
+      if (codeblockStartLine === null) {
+        if (
+          trimmed.startsWith("\\begin{codeblock}") ||
+          trimmed.startsWith("\\begin{codeblockdigitsep}")
+        ) {
+          codeblockStartLine = this.lineIdx;
+        }
+        continue;
+      }
+
       if (
         trimmed.startsWith("\\end{codeblock}") ||
         trimmed.startsWith("\\end{codeblockdigitsep}")
       ) {
-        return [lines.slice(startLine + 1, i).join("\n"), i];
+        return this.lines
+          .slice(codeblockStartLine + 1, this.lineIdx)
+          .join("\n");
       }
     }
+    return null;
   }
-  return [null, lines.length - 1];
 }

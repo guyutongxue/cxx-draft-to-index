@@ -1,32 +1,31 @@
+import { Codeblock } from "../latex";
 import type { PreprocessedCodeblock, SymbolEntry } from "../types";
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { preprocessCode } from "./pp";
-import type { GlobalSymbolTable } from "./symbol_table";
 
 export { preprocessCode };
 
 export function parseCodeblock(
   code: string,
   header: string,
-  symTable?: GlobalSymbolTable,
+  parsedSymbols?: SymbolEntry[],
 ): SymbolEntry[] {
   const { preprocessedCode, macroSymbols } = preprocessCode(code, header);
 
   const lexer = new Lexer(preprocessedCode);
-  const parser = new Parser(lexer, header, symTable);
+  const parser = new Parser(lexer, header, parsedSymbols);
   const symbols = parser.parseTopLevel();
 
   return [...macroSymbols, ...symbols];
 }
 
 export function preprocessCodeblock(
-  code: string,
-  header: string,
+  codeblock: Codeblock,
 ): PreprocessedCodeblock {
   const { preprocessedCode, macroSymbols, includes } = preprocessCode(
-    code,
-    header,
+    codeblock.code,
+    codeblock.header,
   );
-  return { header, preprocessedCode, macroSymbols, includes };
+  return { ...codeblock, preprocessedCode, macroSymbols, includes };
 }
