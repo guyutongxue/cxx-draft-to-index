@@ -7,8 +7,7 @@ A tool to parse and index C++ standard draft documents.
 **This project is still in very early development.** The implementation is incomplete, APIs are unstable, and functionality is subject to change. Use at your own risk.
 
 TODO:
-- class member and nested declarations
-- enumerators
+- fix merging
 
 ## Overview
 
