@@ -8,8 +8,8 @@ type MergeEligibleSymbol = Extract<
       | "struct"
       | "union"
       | "classTemplate"
-      | "partialTemplateSpecialization"
-      | "fullTemplateSpecialization"
+      | "classPartialSpecialization"
+      | "classFullSpecialization"
       | "enum";
   }
 >;
@@ -82,8 +82,8 @@ function mergeKey(symbol: SymbolEntry, parentScope: string[]): string | null {
   const qualifiedName = [...parentScope, symbol.name].join("::");
   const keyParts = [symbol.kind, symbol.namespace, qualifiedName];
   if (
-    symbol.kind === "partialTemplateSpecialization" ||
-    symbol.kind === "fullTemplateSpecialization"
+    symbol.kind === "classPartialSpecialization" ||
+    symbol.kind === "classFullSpecialization"
   ) {
     keyParts.push(symbol.templateArgs.join(","));
   }
@@ -93,13 +93,10 @@ function mergeKey(symbol: SymbolEntry, parentScope: string[]): string | null {
 function isMergeTarget(symbol: SymbolEntry): symbol is MergeEligibleSymbol {
   return (
     symbol.kind === "class" ||
-    symbol.kind === "struct" ||
     symbol.kind === "union" ||
     symbol.kind === "classTemplate" ||
-    (symbol.kind === "partialTemplateSpecialization" &&
-      symbol.templateKind === "class") ||
-    (symbol.kind === "fullTemplateSpecialization" &&
-      symbol.templateKind === "class") ||
+    symbol.kind === "classPartialSpecialization" ||
+    symbol.kind === "classFullSpecialization" ||
     symbol.kind === "enum"
   );
 }

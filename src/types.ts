@@ -118,11 +118,11 @@ export interface DeductionGuideSymbolEntry extends SymbolEntryBase {
   targetType: string;
 }
 
-interface TemplateInfo {
+export interface Template {
   templateParams: TemplateParameter[];
   // template <params...> requires <constraints> <decl>
   templateRequires?: string | null;
-};
+}
 
 interface SpecializationInfo {
   templateArgs: string[]; // raw template argument strings
@@ -136,7 +136,7 @@ type Templatize<T extends SymbolEntryBase> = Computed<
   }
     ? Omit<T, "kind"> & {
         kind: `${Kind}Template`;
-      } & TemplateInfo
+      } & Template
     : never
 >;
 
@@ -155,7 +155,8 @@ type PartialSpecialize<T extends SymbolEntryBase> = Computed<
   }
     ? Omit<T, "kind"> & {
         kind: `${Kind}PartialSpecialization`;
-      } & TemplateInfo & SpecializationInfo
+      } & Template &
+        SpecializationInfo
     : never
 >;
 
@@ -163,25 +164,19 @@ export interface TypeAliasTemplateSymbolEntry extends Templatize<
   TypeAliasSymbolEntry & { syntax: "using" }
 > {}
 export interface FunctionTemplateSymbolEntry extends Templatize<FunctionSymbolEntry> {}
-export interface ClassTemplateSymbolEntry extends Templatize<
-  ClassSymbolEntry & { kind: "class" | "struct" }
-> {}
+export interface ClassTemplateSymbolEntry extends Templatize<ClassSymbolEntry> {}
 export interface VariableTemplateSymbolEntry extends Templatize<VariableSymbolEntry> {}
 export interface DeductionGuideTemplateSymbolEntry extends Templatize<DeductionGuideSymbolEntry> {}
 
-export interface ConceptSymbolEntry extends TemplateInfo, SymbolEntryBase {
+export interface ConceptSymbolEntry extends Template, SymbolEntryBase {
   kind: "concept";
 }
 
 export interface FunctionFullSpecializationSymbolEntry extends FullSpecialize<FunctionSymbolEntry> {}
-export interface ClassFullSpecializationSymbolEntry extends FullSpecialize<
-  ClassSymbolEntry
-> {}
+export interface ClassFullSpecializationSymbolEntry extends FullSpecialize<ClassSymbolEntry> {}
 export interface VariableFullSpecializationSymbolEntry extends FullSpecialize<VariableSymbolEntry> {}
 
-export interface ClassPartialSpecializationSymbolEntry extends PartialSpecialize<
-  ClassSymbolEntry
-> {}
+export interface ClassPartialSpecializationSymbolEntry extends PartialSpecialize<ClassSymbolEntry> {}
 export interface VariablePartialSpecializationSymbolEntry extends PartialSpecialize<VariableSymbolEntry> {}
 
 export type SymbolEntry =
@@ -232,8 +227,6 @@ export type ExtractKind<
     ? T
     : never
   : never;
-
-type X = ExtractKind<SymbolEntry, "classTemplate">;
 
 export interface HeaderIndex {
   header: string;

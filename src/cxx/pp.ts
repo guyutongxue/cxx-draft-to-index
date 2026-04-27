@@ -54,7 +54,7 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
           console.warn(`#define regex matching failed: ${rest}`);
           continue;
         }
-        const namespace = ""; // macros should not have namespace
+        const namespace: never[] = []; // macros should not have namespace
         const [, name, parameterStr] = match;
         if (parameterStr) {
           const parameters = parameterStr

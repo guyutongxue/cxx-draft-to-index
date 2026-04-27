@@ -6,6 +6,7 @@ import type {
   SymbolEntry,
   SymbolEntryBase,
   SymbolKind,
+  Template,
   TemplateParameter,
 } from "../types";
 import { resolveLatex } from "./latex";
@@ -39,13 +40,17 @@ interface ParameterInfo {
   typeInfo: string;
 }
 
-interface TemplateInfo {
-  // explicitInstantiation?: boolean;
-
+interface PlainTemplateInfo {
   fullSpecialization: boolean;
   templateParameters: TemplateParameterInfo[];
-
   requiresClause: string | null;
+}
+// include outer template head, e.g.
+// template <typename T>     // <- nested: [{...}]
+//    template <typename U>
+// class A<T>::B { ... }
+interface TemplateInfo extends PlainTemplateInfo {
+  nested: PlainTemplateInfo[]; // from outer to inner
 }
 
 enum DeclarationContextType {
@@ -157,6 +162,10 @@ interface ClassSpecifierInfo {
   tagKind: ClassTagKind;
   id: IdExpressionInfo;
   baseSpecifiers: BaseSpecifierInfo[];
+  /**
+   * The last part of `id`'s templateArgs.
+   * Indicate this specifier references-to or declares a specialization.
+   */
   templateArgs: TemplateArgumentInfo[] | null;
   useKind: ClassSpecifierUseKind;
   raw: string;
@@ -600,75 +609,76 @@ export class Parser {
       classSpecifier?.useKind === "definition"
     ) {
       if (classSpecifier.tagKind === "union") {
-        this.assert(!templateInfo, "union cannot be template");
-        symbols.push(
-          this.buildSymbol("union", {
-            name: classSpecifier.id.name,
-            raw: classSpecifier.raw + ";",
-            members: classSpecifier.members,
-          }),
-        );
+        if (classSpecifier.id.parts.length !== 1) {
+          console.warn(`(Re-)declaration of a union is not supported`);
+        } else {
+          symbols.push(
+            this.buildSymbol("union", {
+              name: classSpecifier.id.name,
+              raw: classSpecifier.raw + ";",
+              members: classSpecifier.members,
+            }),
+          );
+        }
       } else if (templateInfo) {
-        const templateParams = this.buildTemplateParams(templateInfo);
         if (templateInfo.fullSpecialization) {
           this.assert(
             classSpecifier.templateArgs,
             "full specialization must have template args",
           );
           symbols.push(
-            this.buildSymbol("classFullSpecialization", {
-              name: this.nameWithoutTemplateArg(classSpecifier.id),
-              classKey: classSpecifier.tagKind,
-              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
-              raw: this.lexer.range(startLoc, this.tok.loc),
-              templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
-              members: classSpecifier.members,
-            }),
-          );
-        } else if (classSpecifier.templateArgs) {
-          symbols.push(
-            this.buildSymbol("classPartialSpecialization", {
-              name: this.nameWithoutTemplateArg(classSpecifier.id),
-              classKey: classSpecifier.tagKind,
-              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
-              raw: this.lexer.range(startLoc, this.tok.loc),
-              templateParams,
-              templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
-              members: classSpecifier.members,
-            }),
-          );
-        } else {
-          if (classSpecifier.id.parts.length !== 1) {
-            console.warn(
-              `(Re-)declaration of a scoped class template is not supported`,
-            );
-          } else {
-            symbols.push(
-              this.buildSymbol("classTemplate", {
-                name: classSpecifier.id.name,
+            this.buildNestedSymbol(
+              "classFullSpecialization",
+              templateInfo,
+              classSpecifier.id,
+              {
                 classKey: classSpecifier.tagKind,
                 base: classSpecifier.baseSpecifiers.map((b) => b.raw),
                 raw: this.lexer.range(startLoc, this.tok.loc),
-                templateParams,
+                templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
                 members: classSpecifier.members,
-              }),
-            );
-          }
-        }
-      } else {
-        if (classSpecifier.id.parts.length !== 1) {
-          console.warn(`(Re-)declaration of a scoped class is not supported`);
+              },
+            ),
+          );
+        } else if (classSpecifier.templateArgs) {
+          symbols.push(
+            this.buildNestedSymbol(
+              "classPartialSpecialization",
+              templateInfo,
+              classSpecifier.id,
+              {
+                classKey: classSpecifier.tagKind,
+                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
+                members: classSpecifier.members,
+              },
+            ),
+          );
         } else {
           symbols.push(
-            this.buildSymbol("class", {
-              name: classSpecifier.id.name,
-              classKey: classSpecifier.tagKind,
-              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
-              raw: classSpecifier.raw + ";",
-              members: classSpecifier.members,
-            }),
+            this.buildNestedSymbol(
+              "classTemplate",
+              templateInfo,
+              classSpecifier.id,
+              {
+                classKey: classSpecifier.tagKind,
+                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                members: classSpecifier.members,
+              },
+            ),
           );
         }
+      } else {
+        symbols.push(
+          this.buildNestedSymbol("class", templateInfo, classSpecifier.id, {
+            classKey: classSpecifier.tagKind,
+            base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+            raw: classSpecifier.raw + ";",
+            members: classSpecifier.members,
+          }),
+        );
       }
     }
     if (classSpecifier?.useKind === "friendType") {
@@ -690,16 +700,21 @@ export class Parser {
     for (const declarator of declaratorList.declarators) {
       const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
       this.assert(declarator.idExpr, `Declarator must have an id-expression`);
-      const idLastPart = declarator.idExpr.parts.at(-1);
-      const partialSpecialization = templateInfo && idLastPart?.templateArgs;
+      if (declarator.idExpr.parts.length !== 1) {
+        console.warn(
+          `(Re-)declaration of a scoped function or variable (or corresponding template or specialization) is not supported: ${declarator.idExpr.name}`,
+        );
+        continue;
+      }
+      const idLastPart = declarator.idExpr.parts.at(-1)!;
+      const partialSpecialization = templateInfo && idLastPart.templateArgs;
       if (declarator.function) {
         let operator: string | null = null;
-        const lastPart = declarator.idExpr.parts.at(-1);
-        switch (lastPart?.kind) {
+        switch (idLastPart.kind) {
           case IdPartKind.UDL:
           case IdPartKind.Operator:
           case IdPartKind.Conversion:
-            operator = lastPart.value;
+            operator = idLastPart.value;
             break;
         }
         const parameters = declarator.function.parameters.map((p) => ({
@@ -753,7 +768,7 @@ export class Parser {
           );
           if (templateInfo.fullSpecialization) {
             this.assert(
-              idLastPart?.templateArgs,
+              idLastPart.templateArgs,
               `full template specialization should have template args`,
             );
             symbols.push(
@@ -773,12 +788,6 @@ export class Parser {
               }),
             );
           } else {
-            if (declarator.idExpr.parts.length !== 1) {
-              console.warn(
-                `(Re-)declaration of a scoped function template is not supported`,
-              );
-              continue;
-            }
             if (partialSpecialization) {
               this.die(`Function template cannot be partial specialized`);
             }
@@ -802,12 +811,6 @@ export class Parser {
           }
           break;
         } else {
-          if (declarator.idExpr.parts.length !== 1) {
-            console.warn(
-              `(Re-)declaration of a scoped function is not supported`,
-            );
-            continue;
-          }
           symbols.push(
             this.buildSymbol("function", {
               name: declarator.idExpr.name,
@@ -834,9 +837,13 @@ export class Parser {
         const raw = this.lexer.range(startLoc, this.tok.loc);
 
         if (templateInfo) {
+          this.assert(
+            declaratorList.declarators.length === 1,
+            "Variable template cannot have multiple declarators",
+          );
           if (templateInfo.fullSpecialization) {
             this.assert(
-              idLastPart?.templateArgs,
+              idLastPart.templateArgs,
               `full template specialization should have template args`,
             );
             symbols.push(
@@ -864,12 +871,6 @@ export class Parser {
               }),
             );
           } else {
-            if (declarator.idExpr.parts.length !== 1) {
-              console.warn(
-                `(Re-)declaration of a scoped variable template is not supported`,
-              );
-              continue;
-            }
             symbols.push(
               this.buildSymbol("variableTemplate", {
                 name: declarator.idExpr.name,
@@ -884,12 +885,6 @@ export class Parser {
             );
           }
         } else {
-          if (declarator.idExpr.parts.length !== 1) {
-            console.warn(
-              `(Re-)declaration of a scoped variable is not supported`,
-            );
-            continue;
-          }
           symbols.push(
             this.buildSymbol("variable", {
               name: declarator.idExpr.name,
@@ -1642,35 +1637,40 @@ export class Parser {
     contextType: DeclarationContextType;
     scopeClassName: string | null;
   }): SymbolEntry[] {
-    const templateParameters = [];
-    let requiresClause: string | null = null;
-    let fullSpecialization = false;
-    this.consumeId("template");
-    const params = this.parseTemplateParameterList();
-    if (params.length === 0) {
-      fullSpecialization = true;
-    }
-    templateParameters.push(...params);
-    if (this.isId("requires")) {
-      this.consumeId("requires");
-      const startLoc = this.tok.loc;
-      this.parseConstraintExpression();
-      const endLoc = this.tok.loc;
-      requiresClause = this.lexer.range(startLoc, endLoc);
-    }
-    // there might be multiple template header... unsupported, sadly
-    //   template <typename T>
-    //     template <typename U>
-    //       class A<T>::B { ... };
-    if (this.isId("template")) {
-      this.unimplemented("multiple template header");
-    }
+    const templateHeadList: PlainTemplateInfo[] = [];
+    do {
+      const templateParameters = [];
+      let requiresClause: string | null = null;
+      let fullSpecialization = false;
+      this.consumeId("template");
+      const params = this.parseTemplateParameterList();
+      if (params.length === 0) {
+        fullSpecialization = true;
+      }
+      templateParameters.push(...params);
+      if (this.isId("requires")) {
+        this.consumeId("requires");
+        const startLoc = this.tok.loc;
+        this.parseConstraintExpression();
+        const endLoc = this.tok.loc;
+        requiresClause = this.lexer.range(startLoc, endLoc);
+      }
+      templateHeadList.push({
+        templateParameters,
+        requiresClause,
+        fullSpecialization,
+      });
+    } while (this.isId("template"));
+    const lastHead = templateHeadList.pop()!;
     const templateInfo: TemplateInfo = {
-      fullSpecialization: fullSpecialization,
-      templateParameters,
-      requiresClause,
+      ...lastHead,
+      nested: templateHeadList,
     };
     if (this.isId("concept")) {
+      this.assert(
+        templateInfo.nested.length === 0,
+        `Concept cannot have multiple template heads`,
+      );
       return this.parseConcept({ templateInfo, startLoc, contextType });
     }
     return this.parseDeclarationAfterTemplate({
@@ -2587,6 +2587,16 @@ export class Parser {
     })();
   }
 
+  private buildTemplateParams(params: TemplateInfo): TemplateParameter[] {
+    return params.templateParameters.map((p) => ({
+      raw: p.raw,
+      kind: p.kind,
+      name: p.name,
+      defaultArg: p.defaultArg,
+      pack: p.pack,
+      type: p.typeInfo ?? "",
+    }));
+  }
   private buildSymbol<Kind extends SymbolKind>(
     kind: Kind,
     info: Omit<
@@ -2602,15 +2612,53 @@ export class Parser {
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as SymbolEntry;
   }
-
-  private buildTemplateParams(params: TemplateInfo): TemplateParameter[] {
-    return params.templateParameters.map((p) => ({
-      raw: p.raw,
-      kind: p.kind,
-      name: p.name,
-      defaultArg: p.defaultArg,
-      pack: p.pack,
-      type: p.typeInfo ?? "",
-    }));
+  private buildNestedSymbol<Kind extends Extract<SymbolKind, `class${string}`>>(
+    kind: Kind,
+    template: TemplateInfo | null,
+    id: IdExpressionInfo,
+    info: Omit<
+      ExtractKind<SymbolEntry, Kind>,
+      Exclude<keyof SymbolEntryBase, "raw"> | "kind" | keyof Template
+    >,
+  ): SymbolEntry {
+    this.assert(
+      id.parts.length > 0,
+      "id-expression in a class declaration should have at least one part",
+    );
+    if (id.parts.length === 1) {
+      const info2 = info as any;
+      switch (kind) {
+        case "class": {
+          return this.buildSymbol("class", {
+            name: id.name,
+            ...info2,
+          });
+        }
+        case "classTemplate": {
+          return this.buildSymbol("classTemplate", {
+            name: id.name,
+            templateParams: this.buildTemplateParams(template!),
+            templateRequires: template!.requiresClause,
+            ...info2,
+          });
+        }
+        case "classFullSpecialization": {
+          return this.buildSymbol("classFullSpecialization", {
+            name: id.name,
+            ...info2,
+          });
+        }
+        case "classPartialSpecialization": {
+          return this.buildSymbol("classPartialSpecialization", {
+            name: id.name,
+            templateParams: this.buildTemplateParams(template!),
+            templateRequires: template!.requiresClause,
+            ...info2,
+          });
+        }
+      }
+    } else {
+      this.die(`Unsupported nested name in class declaration: ${id.name}`);
+    }
   }
 }
