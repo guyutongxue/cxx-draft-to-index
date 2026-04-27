@@ -5,7 +5,6 @@ type MergeEligibleSymbol = Extract<
   {
     kind:
       | "class"
-      | "struct"
       | "union"
       | "classTemplate"
       | "classPartialSpecialization"
@@ -26,10 +25,9 @@ function mergeSymbolsImpl(
   const keys: (string | null)[] = [];
   for (const symbol of symbols) {
     const key = mergeKey(symbol, scope);
-    if (key) {
+    if (key !== null) {
       const existingIndex = keys.indexOf(key);
       if (existingIndex !== -1) {
-        // Merge with existing symbol
         const existingSymbol = result[existingIndex] as MergeEligibleSymbol;
         result[existingIndex] = mergeSingleSymbol(
           scope,
@@ -37,12 +35,10 @@ function mergeSymbolsImpl(
           symbol as MergeEligibleSymbol,
         );
       } else {
-        // New symbol
         keys.push(key);
         result.push(symbol);
       }
     } else {
-      // Not eligible for merging, just add it
       keys.push(null);
       result.push(symbol);
     }
@@ -56,21 +52,34 @@ function mergeSingleSymbol<T extends MergeEligibleSymbol>(
   incoming: T,
 ): T {
   if (exists.kind === "enum" && incoming.kind === "enum") {
+    const isDefinition = incoming.enumerators !== null;
     return {
       ...exists,
+      ...(isDefinition ? { raw: incoming.raw } : {}),
       enumerators: exists.enumerators ?? incoming.enumerators,
     };
   }
 
-  if (isClassLike(exists) && isClassLike(incoming) && incoming.members) {
-    const members = mergeSymbolsImpl(
-      [...scope, exists.name],
-      [...(exists.members ?? []), ...incoming.members],
-    );
-    return {
-      ...exists,
-      members,
-    };
+  if (isClassLike(exists) && isClassLike(incoming)) {
+    const isDefinition = incoming.members !== null;
+
+    let members: ClassMemberEntry[] | null;
+    if (isDefinition && exists.members) {
+      members = mergeSymbolsImpl(
+        [...scope, exists.name],
+        [...exists.members, ...incoming.members!],
+      ) as ClassMemberEntry[];
+    } else if (isDefinition) {
+      members = incoming.members;
+    } else {
+      members = exists.members;
+    }
+
+    const merged = { ...exists, members };
+    if (isDefinition) {
+      merged.raw = incoming.raw;
+    }
+    return merged;
   }
   return exists;
 }
@@ -79,8 +88,19 @@ function mergeKey(symbol: SymbolEntry, parentScope: string[]): string | null {
   if (!isMergeTarget(symbol)) {
     return null;
   }
+  const namespaceStr = symbol.namespace
+    .map((n) => n.name ?? "(anon)")
+    .join("::");
   const qualifiedName = [...parentScope, symbol.name].join("::");
-  const keyParts = [symbol.kind, symbol.namespace, qualifiedName];
+  const keyParts = [symbol.kind, namespaceStr, qualifiedName];
+  if (
+    symbol.kind === "classTemplate" ||
+    symbol.kind === "classPartialSpecialization"
+  ) {
+    keyParts.push(
+      symbol.templateParams.map((p) => p.name ?? "(anon)").join(","),
+    );
+  }
   if (
     symbol.kind === "classPartialSpecialization" ||
     symbol.kind === "classFullSpecialization"

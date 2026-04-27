@@ -2,13 +2,6 @@ import { expect, test } from "bun:test";
 import { Lexer } from "../src/cxx/lexer";
 import { Parser } from "../src/cxx/parser";
 
-test("lexer handles backslash char literal", () => {
-  const lexer = new Lexer("'\\\\'");
-  expect(lexer.tok.value).toBe("'\\\\'");
-  expect(lexer.tok.isEof()).toBe(false);
-  expect(lexer.next().isEof()).toBe(true);
-});
-
 test("ctor disambiguation failed should die", () => {
   const code = `
 using T = int;

@@ -58,10 +58,23 @@ async function main() {
     console.log(`  -> ${symbols.length} symbols`);
   }
 
-  const mergedHeaders: HeaderIndex[] = headers.map((h) => ({
-    header: h.header,
-    symbols: mergeSymbols(h.symbols),
-  }));
+  const groupedByHeader = new Map<string, SymbolEntry[]>();
+  for (const h of headers) {
+    const existing = groupedByHeader.get(h.header);
+    if (existing) {
+      existing.push(...h.symbols);
+    } else {
+      groupedByHeader.set(h.header, [...h.symbols]);
+    }
+  }
+
+  const mergedHeaders: HeaderIndex[] = [];
+  for (const [header, syms] of groupedByHeader) {
+    mergedHeaders.push({
+      header,
+      symbols: mergeSymbols(syms),
+    });
+  }
 
   const output: IndexOutput = {
     version: "1.0.0",
