@@ -4,6 +4,8 @@
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
+    "build": "bun run src/main.ts",
+    "serve": "bun run src/web/server.tsx",
     "start": "bun run src/main.ts",
     "test": "bun test"
   },
