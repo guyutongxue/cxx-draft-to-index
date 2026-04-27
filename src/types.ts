@@ -228,6 +228,18 @@ export type ExtractKind<
     : never
   : never;
 
+export interface PreprocessedCodeblock {
+  header: string;
+  preprocessedCode: string;
+  macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
+  includes: string[];
+}
+
+export interface SymbolTableEntry {
+  symbol: SymbolEntry;
+  header: string;
+}
+
 export interface HeaderIndex {
   header: string;
   symbols: SymbolEntry[];

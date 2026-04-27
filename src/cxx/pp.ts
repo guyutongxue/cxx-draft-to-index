@@ -1,9 +1,10 @@
 import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../types";
 import { resolveLaTeXInText } from "./latex";
 
-interface PreprocessResult {
+export interface PreprocessResult {
   preprocessedCode: string;
   macroSymbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[];
+  includes: string[];
 }
 
 // Replace these commands to empty string:
@@ -11,8 +12,11 @@ interface PreprocessResult {
 // \itcorr: alignment correction for italic text, should not appear in code
 const PREPROCESSED_LATEX = /@(\\vdots|\\itcorr(\[[^\]]*\])?)@/g;
 
+const DIRECTIVE_RE = /^#\s*(\w+)(.*)$/;
+
 export function preprocessCode(code: string, header: string): PreprocessResult {
   const symbols: (MacroSymbolEntry | FunctionLikeMacroSymbolEntry)[] = [];
+  const includes: string[] = [];
   const lines = code.replace(PREPROCESSED_LATEX, "").split("\n");
 
   // join lines with backslashes
@@ -39,16 +43,21 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i].trim();
     const resolved = resolveLaTeXInText(line);
-    const directive = /^#\s*(\w+)(.*)$/.exec(resolved);
+    const directive = DIRECTIVE_RE.exec(resolved);
     if (directive) {
+      const [, directiveName, rest] = directive;
       const raw = resolved
         .replace(/\s+/g, " ")
         .replace(/\/\/.*/gm, " ")
         .trim();
-      // preprocessor directive
-      const [, directiveName, rest] = directive;
-      if (directiveName === "define") {
-        // Extract macro name and parameters
+      if (directiveName === "include") {
+        const m = /<([^>]+)>/.exec(rest);
+        if (m) {
+          includes.push(m[1]);
+        } else {
+          console.warn(`#include regex matching failed: ${resolved}`);
+        }
+      } else if (directiveName === "define") {
         const match = rest.match(/^\s*(\w+)(?:\(([^)]*)\))?/);
         if (!match) {
           console.warn(`#define regex matching failed: ${rest}`);
@@ -81,12 +90,13 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
           });
         }
       }
-      // preprocessed
+      // preprocessed (remove all preprocessor directives from code)
       lines[i] = "";
     }
   }
   return {
     preprocessedCode: lines.join("\n"),
     macroSymbols: symbols,
+    includes,
   };
 }

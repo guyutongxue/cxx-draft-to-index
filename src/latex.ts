@@ -9,7 +9,7 @@ export interface HeaderSynopsis {
 
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
 
-const PATCHES = {
+const PATCHES: Record<string, [string, string][]> = {
   "algorithms.tex": [
     [
       `    constexpr OutputIterator fill_n(OutputIterator first, Size n, const T& value)`,
@@ -46,11 +46,11 @@ const PATCHES = {
     ],
     [
       `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y\n`,
-      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,\n`
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const @\\exposid{deduced-vec-t}@<V>& x, const V& y,\n`,
     ],
     [
       `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y`,
-      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,`
+      `    constexpr @\\exposid{deduced-vec-t}@<V> hypot(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,`,
     ],
     [
       `    constexpr @\\exposid{deduced-vec-t}@<V> fma(const @\\exposid{deduced-vec-t}@<V>& x, const @\\exposid{deduced-vec-t}@<V>& y`,
@@ -75,9 +75,22 @@ const PATCHES = {
     [
       `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y\n`,
       `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,\n`,
-    ]
+    ],
   ],
-} as Record<string, [string, string][]>;
+  "ranges.tex": [
+    [
+      `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>`,
+      `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>;`,
+    ],
+  ],
+};
+
+const REQUIRED_MISSING_INCLUDES: Record<string, string[]> = {
+  // uses specializations of std::ranges::enable_view
+  filesystem: ["ranges"],
+  span: ["ranges"],
+  optional: ["ranges"],
+};
 
 function applyPatches(fileName: string, content: string): string {
   const patches = PATCHES[fileName];
@@ -156,19 +169,26 @@ function extractFromSingleFile(
     }
     let hasSynopsis = false;
     while (true) {
-      const [code, nextLine] = findNextCodeblockInThisHeader(
-        fileName,
-        lines,
-        i + 1,
-      );
-      i = nextLine;
+      let code: string | null;
+      [code, i] = findNextCodeblockInThisHeader(fileName, lines, i + 1);
       if (code === null) {
         break;
       }
-      if (hasSynopsis /* && !isClassDefinitionCodeblock(code) */) {
+      if (hasSynopsis && !isClassDefinitionCodeblock(code)) {
         continue;
       }
-      hasSynopsis = true;
+      if (!hasSynopsis) {
+        hasSynopsis = true;
+        // add missing #include to the header synopsis
+        if (REQUIRED_MISSING_INCLUDES[headerName]) {
+          code =
+            REQUIRED_MISSING_INCLUDES[headerName]
+              .map((inc) => `#include <${inc}>`)
+              .join("\n") +
+            "\n" +
+            code;
+        }
+      }
       results.push({
         header: headerName,
         code,

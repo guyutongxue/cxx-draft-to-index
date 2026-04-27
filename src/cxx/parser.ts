@@ -11,11 +11,13 @@ import type {
 } from "../types";
 import { resolveLatex } from "./latex";
 import { Lexer, Location, Punctuation, Token, TokenType } from "./lexer";
-import { produce } from "immer";
+import { Draft, Immutable, produce } from "immer";
 
 interface ParserContext {
   readonly linkageStack: readonly string[];
   readonly nsStack: readonly NamespaceInfo[];
+  readonly scopeState: "namespace" | "member";
+  readonly builtSymbols: readonly SymbolEntry[];
 }
 
 interface AttributeInfo {
@@ -59,6 +61,7 @@ enum DeclarationContextType {
   TopLevel = "topLevel",
   Trailing = "trailing",
   Parameter = "parameter",
+  Conversion = "conversion", // operator const int () const;
 }
 
 interface ExpressionInfo {
@@ -197,6 +200,12 @@ interface DeclarationSpecifierInfo {
   enumSpecifier: EnumSpecifierInfo | null;
 }
 
+enum DeclaratorContextType {
+  Declaration = "declaration",
+  Parameter = "parameter", // can be abstract
+  Conversion = "conversion", // no paren, function and array allowed
+}
+
 interface DeclaratorInfo {
   pack: boolean;
   idExpr: IdExpressionInfo | null;
@@ -265,6 +274,7 @@ export class Parser {
 
   private lexer: Lexer;
   private context: ParserContext;
+  private readonly parsedSymbols: Immutable<SymbolEntry[]>;
 
   /** current token */
   private get tok() {
@@ -274,12 +284,19 @@ export class Parser {
     return this.lexer.peek();
   }
 
-  constructor(lexer: Lexer, filename: string) {
+  constructor(
+    lexer: Lexer,
+    filename: string,
+    parsedSymbols: SymbolEntry[] = [],
+  ) {
     this.lexer = lexer;
     this.filename = filename;
+    this.parsedSymbols = parsedSymbols;
     this.context = {
       linkageStack: [],
       nsStack: [],
+      scopeState: "namespace",
+      builtSymbols: [],
     };
   }
 
@@ -365,7 +382,7 @@ export class Parser {
   ): Token[] {
     const tokens: Token[] = [];
     let depth = 0;
-    let parenDepth = 0;
+    let brakDepth = 0;
     while (!this.eof()) {
       const token = this.tok;
       const v = token.value;
@@ -377,26 +394,26 @@ export class Parser {
         break;
       }
       const open =
-        parenDepth === 0 && considerUnparenedAngle
+        brakDepth === 0 && considerUnparenedAngle
           ? ["(", "{", "[", "[:", "<"]
           : ["(", "{", "[", "[:"];
       tokens.push(token);
       this.adv();
       if (open.includes(v)) {
         depth++;
-        if (v === "(") {
-          parenDepth++;
+        if (v !== "<") {
+          brakDepth++;
         }
         continue;
       }
       const close =
-        parenDepth === 0 && considerUnparenedAngle
+        brakDepth === 0 && considerUnparenedAngle
           ? [")", "}", "]", ":]", ">"]
           : [")", "}", "]", ":]"];
       if (close.includes(v)) {
         depth--;
-        if (v === ")") {
-          parenDepth--;
+        if (v !== ">") {
+          brakDepth--;
         }
       }
     }
@@ -589,8 +606,6 @@ export class Parser {
   }): SymbolEntry[] {
     const symbols: SymbolEntry[] = [];
     const declSpecifier = this.parseDeclarationSpecifiers({
-      declStartLoc: startLoc,
-      templateInfo,
       scopeClassName,
       contextType,
     });
@@ -610,7 +625,7 @@ export class Parser {
     ) {
       if (classSpecifier.tagKind === "union") {
         if (classSpecifier.id.parts.length !== 1) {
-          console.warn(`(Re-)declaration of a union is not supported`);
+          console.warn(`(Re-)declaration of a scoped union is not supported`);
         } else {
           symbols.push(
             this.buildSymbol("union", {
@@ -700,14 +715,25 @@ export class Parser {
     for (const declarator of declaratorList.declarators) {
       const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
       this.assert(declarator.idExpr, `Declarator must have an id-expression`);
-      if (declarator.idExpr.parts.length !== 1) {
-        console.warn(
-          `(Re-)declaration of a scoped function or variable (or corresponding template or specialization) is not supported: ${declarator.idExpr.name}`,
-        );
-        continue;
-      }
       const idLastPart = declarator.idExpr.parts.at(-1)!;
       const partialSpecialization = templateInfo && idLastPart.templateArgs;
+      if (declarator.idExpr.parts.length !== 1) {
+        if (partialSpecialization || templateInfo?.fullSpecialization) {
+          const idExprWithoutTemplateArg = this.removeTemplateArgsFromId(
+            declarator.idExpr,
+          );
+          this.lookupId(
+            idExprWithoutTemplateArg,
+            templateInfo,
+            "looking up specialization target",
+          );
+        } else {
+          console.warn(
+            `(Re-)declaration of a scoped function or variable (or corresponding template) is not supported: ${declarator.idExpr.name}`,
+          );
+          continue;
+        }
+      }
       if (declarator.function) {
         let operator: string | null = null;
         switch (idLastPart.kind) {
@@ -773,7 +799,7 @@ export class Parser {
             );
             symbols.push(
               this.buildSymbol("functionFullSpecialization", {
-                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateArgs: idLastPart.templateArgs.map((a) => a.raw),
                 operator,
@@ -848,7 +874,7 @@ export class Parser {
             );
             symbols.push(
               this.buildSymbol("variableFullSpecialization", {
-                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
                 templateArgs: idLastPart?.templateArgs.map((a) => a.raw),
                 type,
                 raw,
@@ -860,7 +886,7 @@ export class Parser {
           } else if (partialSpecialization) {
             symbols.push(
               this.buildSymbol("variablePartialSpecialization", {
-                name: this.nameWithoutTemplateArg(declarator.idExpr),
+                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateArgs: partialSpecialization.map((a) => a.raw),
                 raw,
@@ -902,13 +928,9 @@ export class Parser {
   }
 
   private parseDeclarationSpecifiers({
-    declStartLoc,
-    templateInfo,
     scopeClassName,
     contextType,
   }: {
-    declStartLoc: Location;
-    templateInfo: TemplateInfo | null;
     scopeClassName: string | null;
     contextType: DeclarationContextType;
   }): DeclarationSpecifierInfo {
@@ -928,11 +950,13 @@ export class Parser {
     const readIdExprAsType = (): { notAType: boolean } => {
       // We hits an id-expression while parsing decl-specifier.
       // It might be the declarator of ctor declaration which is not a type-specifier
-      const notAType = this.isTypeSpecifierDisallowed({
-        declSpecifiers: [...declSpecifiers],
-        scopeClassName,
-        contextType,
-      });
+      const notAType =
+        contextType !== DeclarationContextType.Conversion &&
+        this.isTypeSpecifierDisallowed({
+          declSpecifiers: [...declSpecifiers],
+          scopeClassName,
+          contextType,
+        });
       if (!notAType) {
         const idExpression = this.readIdExpression();
         if (idExpression.parts.at(-1)?.conceptName) {
@@ -999,7 +1023,6 @@ export class Parser {
       } else if (CLASS_SPECIFIER_KEYWORD.includes(id)) {
         classSpecifier = this.parseClassSpecifier({
           previousSpecifiers: [...declSpecifiers],
-          declStartLoc,
           contextType,
         });
       } else if (id === "enum") {
@@ -1061,7 +1084,7 @@ export class Parser {
       }
       const declarator = this.parseDeclarator({
         declSpecifier,
-        abstract: false,
+        contextType: DeclaratorContextType.Declaration,
       });
       let initializer: ExpressionInfo | null = null;
       if (declarator.function) {
@@ -1069,6 +1092,7 @@ export class Parser {
           kind = "functionDefinition";
           this.consumeP("=");
           if (this.tok.type === TokenType.Number && this.tok.value === "0") {
+            this.adv(); // consume 0
             // pure virtual function
             specialFunctionBody = "pure";
           } else if (this.isId("default")) {
@@ -1089,8 +1113,24 @@ export class Parser {
           isTryBlock = true;
         }
         if (this.isP(":")) {
-          // SKIP ctor initializer list
-          this.skipBalancedTokensUntilPunct(["{"], false);
+          this.consumeP(":");
+          // member initializer list
+          while (!this.isP("{")) {
+            this.readIdExpression();
+            // skip initializer expression
+            if (this.isP("(")) {
+              this.skipBalancedBrackets("(", ")");
+            } else {
+              this.skipBalancedBrackets("{", "}");
+            }
+            if (this.isP("...")) {
+              this.consumeP("...");
+            }
+            if (!this.isP(",")) {
+              break;
+            }
+            this.consumeP(",");
+          }
         }
         if (this.isP("{")) {
           this.skipBalancedBrackets("{", "}");
@@ -1133,14 +1173,14 @@ export class Parser {
 
   private parseDeclarator({
     declSpecifier,
-    abstract,
+    contextType,
   }: {
     declSpecifier: DeclarationSpecifierInfo;
-    abstract: boolean;
+    contextType: DeclaratorContextType;
   }): DeclaratorInfo {
     const startLoc = this.tok.loc;
     const { pack, idExpr, surrounding } = this.parseDeclaratorImpl({
-      abstract,
+      contextType,
       depth: 0,
     });
     const endLoc = this.tok.loc;
@@ -1213,10 +1253,10 @@ export class Parser {
   }
 
   private parseDeclaratorImpl({
-    abstract,
+    contextType,
     depth,
   }: {
-    abstract: boolean;
+    contextType: DeclaratorContextType;
     depth: number;
   }): PartialDeclaratorInfo {
     const prefix: DeclaratorSurrounding[] = [];
@@ -1242,7 +1282,7 @@ export class Parser {
       }
     }
     const { pack, idExpr, surrounding } = this.parseDirectDeclarator({
-      abstract,
+      contextType,
       depth,
     });
     surrounding.push(...prefix.toReversed());
@@ -1250,31 +1290,34 @@ export class Parser {
   }
 
   private parseDirectDeclarator({
-    abstract,
+    contextType,
     depth,
   }: {
-    abstract: boolean;
+    contextType: DeclaratorContextType;
     depth: number;
   }): PartialDeclaratorInfo {
     let idExpr: IdExpressionInfo | null = null;
     const surrounding: DeclaratorSurrounding[] = [];
     let pack = false;
-    if (this.isP("(")) {
+    // conversion's declarator cannot be parenthesized
+    if (contextType !== DeclaratorContextType.Conversion && this.isP("(")) {
       this.consumeP("(");
-      const inner = this.parseDeclaratorImpl({ abstract, depth: depth + 1 });
+      const inner = this.parseDeclaratorImpl({ contextType, depth: depth + 1 });
       this.consumeP(")");
       pack = inner.pack;
       idExpr = inner.idExpr;
       surrounding.push(...inner.surrounding);
     } else {
-      if (this.isP("...")) {
+      if (contextType === DeclaratorContextType.Parameter && this.isP("...")) {
         pack = true;
         this.consumeP("...");
       }
-      if (abstract) {
+      if (contextType === DeclaratorContextType.Parameter) {
         idExpr = this.tryReadIdExpression();
-      } else {
+      } else if (contextType === DeclaratorContextType.Declaration) {
         idExpr = this.readIdExpression();
+      } else {
+        return { pack, idExpr: null, surrounding: [] };
       }
       this.tryParseAttribute();
     }
@@ -1671,7 +1714,7 @@ export class Parser {
         templateInfo.nested.length === 0,
         `Concept cannot have multiple template heads`,
       );
-      return this.parseConcept({ templateInfo, startLoc, contextType });
+      return this.parseConcept({ templateInfo, startLoc });
     }
     return this.parseDeclarationAfterTemplate({
       startLoc,
@@ -1719,7 +1762,6 @@ export class Parser {
     contextType,
   }: {
     previousSpecifiers: readonly DeclSpecifierKeyword[];
-    declStartLoc: Location;
     contextType: DeclarationContextType;
   }): ClassSpecifierInfo {
     const startLoc = this.tok.loc;
@@ -1762,7 +1804,7 @@ export class Parser {
         let virtual = false;
         this.tryParseAttribute();
         // access-specifier or virtual
-        if (
+        while (
           this.tok.type === TokenType.Identifier &&
           ["public", "protected", "private", "virtual"].includes(this.tok.value)
         ) {
@@ -1787,6 +1829,7 @@ export class Parser {
         if (!this.isP(",")) {
           break;
         }
+        this.consumeP(",");
       }
       if (this.isP("...")) {
         this.consumeP("...");
@@ -1813,6 +1856,7 @@ export class Parser {
         componentName,
         `Class should have a name to declare its members`,
       );
+      using _omitRecord = this.enterMemberScope();
       members = this.parseMemberSpecification(componentName);
       useKind = "definition";
     }
@@ -1879,19 +1923,17 @@ export class Parser {
     return members;
   }
 
-  // ---- Function ----
+  // MARK: ---- Function ----
 
   private parseParameterDeclaration(): ParameterInfo {
     const startLoc = this.tok.loc;
     const declSpec = this.parseDeclarationSpecifiers({
-      declStartLoc: startLoc,
-      templateInfo: null,
       scopeClassName: null,
       contextType: DeclarationContextType.Parameter,
     });
     const declarator = this.parseDeclarator({
       declSpecifier: declSpec,
-      abstract: true,
+      contextType: DeclaratorContextType.Parameter,
     });
     let defaultArg: ExpressionInfo | null = null;
     if (this.isP("=")) {
@@ -2042,7 +2084,7 @@ export class Parser {
     return this.lexer.range(startLoc, endLoc);
   }
 
-  // ---- Enum ----
+  // MARK: ---- Enum ----
 
   private parseEnumBase(): string {
     this.consumeP(":");
@@ -2123,16 +2165,14 @@ export class Parser {
     return enumerators;
   }
 
-  // ---- Concept ----
+  // MARK: ---- Concept ----
 
   private parseConcept({
     startLoc,
     templateInfo,
-    contextType,
   }: {
     startLoc: Location;
     templateInfo: TemplateInfo;
-    contextType: DeclarationContextType;
   }): SymbolEntry[] {
     this.consumeId("concept");
     const name = this.readIdent();
@@ -2346,8 +2386,15 @@ export class Parser {
         this.adv();
       } else {
         kind = IdPartKind.Conversion;
-        value = this.readIdExpression().name;
-        name += " " + value;
+        const typeSpec = this.parseDeclarationSpecifiers({
+          scopeClassName: null,
+          contextType: DeclarationContextType.Conversion,
+        });
+        const declarator = this.parseDeclarator({
+          declSpecifier: typeSpec,
+          contextType: DeclaratorContextType.Conversion,
+        });
+        name += " " + declarator.typeInfo;
       }
     } else if (this.isIdentifierOrLaTeX()) {
       conceptName = this.tok.value.includes("\\libconcept");
@@ -2402,27 +2449,204 @@ export class Parser {
     return false;
   }
 
-  /**
-   * TODO The argument of nested-name-specifier might point to the main template or partial specialization; we need to:
-   * - resolve the template parameter name and corresponding argument
-   * - if argument literally equals to the parameter, then it should refer to the primary template; otherwise, this refers to a partial specialization
-   *
-   * @ref [expr.prim.id.qual]
-   * (4.5) If a nested-name-specifier N is declarative and has a simple-template-id with a template argument list A that involves a template parameter, let T be the template nominated by N without A. T shall be a class template.
-   * (4.5.1) If A is the template argument list ([temp.arg]) of the corresponding template-head H ([temp.mem]), N designates the primary template of T; H shall be equivalent to the template-head of T ([temp.over.link]).
-   * (4.5.2) Otherwise, N designates the partial specialization ([temp.spec.partial]) of T whose template argument list is equivalent to A ([temp.over.link]); the program is ill-formed if no such partial specialization exists.
-   *
-   */
-
-  /** Used for specialization declarations */
-  private nameWithoutTemplateArg(idExpr: IdExpressionInfo): string {
-    const copy = [...idExpr.parts];
-    const lastPart = copy.pop();
-    this.assert(
-      lastPart?.value,
-      `Cannot call nameWithoutTemplateArg on a computed type-id`,
+  private lookupId(
+    id: IdExpressionInfo,
+    templateInfo: TemplateInfo | null,
+    failureHint?: string,
+  ): Immutable<SymbolEntry>[] | null {
+    const allSymbols = [...this.parsedSymbols, ...this.context.builtSymbols];
+    const currentNs = id.fromGlobal ? [] : this.context.nsStack;
+    const templateHeads = templateInfo
+      ? [...templateInfo.nested, templateInfo]
+      : [];
+    const result = this.lookupIdImpl(
+      id.parts,
+      templateHeads,
+      currentNs,
+      allSymbols,
     );
-    return `${idExpr.fromGlobal ? "::" : ""}${copy.map((p) => p.name + "::").join("")}${lastPart.value}`;
+    if (result) {
+      return result;
+    }
+    console.warn(
+      `Cannot resolve id: ${id.name} when ${failureHint ?? "looking up symbol"}`,
+    );
+    return null;
+  }
+  private lookupIdImpl(
+    idParts: readonly IdExpressionPartInfo[],
+    templateHeads: readonly PlainTemplateInfo[],
+    currentNs: readonly NamespaceInfo[],
+    allSymbols: readonly Immutable<SymbolEntry>[],
+  ): Immutable<SymbolEntry>[] | null {
+    nextSymbol: for (const sym of allSymbols) {
+      if (idParts[0]?.name.includes("lazy_split_view") && sym.name.includes("lazy_split_view")) {
+        debugger;
+      }
+      const parts = [...idParts];
+      const targetNamespace = [...sym.namespace];
+      const currentNamespace = [...currentNs];
+      const currentTemplateHeads = [...templateHeads];
+      while (true) {
+        const targetNsPart = targetNamespace[0];
+        const currentNsPart = currentNamespace[0];
+        if (!currentNsPart) {
+          break;
+        }
+        targetNamespace.shift();
+        currentNamespace.shift();
+        if (targetNsPart?.name !== currentNsPart.name) {
+          continue nextSymbol;
+        }
+      }
+      // now `currentNamespace` is empty, check whether leading part of `id`
+      // references to a namespace name
+      while (parts.length > 0) {
+        const idPart = parts[0]!;
+        if (
+          idPart.kind === IdPartKind.Identifier &&
+          idPart.name === targetNamespace[0]?.name
+        ) {
+          parts.shift();
+          targetNamespace.shift();
+          continue;
+        } else {
+          break;
+        }
+      }
+      if (targetNamespace.length > 0) {
+        continue;
+      }
+      const matchTemplate = (idPart: IdExpressionPartInfo) => {
+        if (sym.kind.endsWith("Template")) {
+          const sym2 = sym as Extract<
+            SymbolEntry,
+            { kind: `${string}Template` }
+          >;
+          // looks up to a main template `template <typename T> C`.
+          // - if it is the last part, then the syntax should be:
+          //   `template <typename T> Foo::Bar::C`
+          // - otherwise the syntax should be
+          //   `template <typename T> Foo::C<T>::Bar`
+          if (parts.length === 1) {
+            return (
+              currentTemplateHeads.length === 1 &&
+              currentTemplateHeads[0].templateParameters.length ===
+                sym2.templateParams.length
+            );
+          } else {
+            const currentTemplateHead = currentTemplateHeads.shift()!;
+            if (!currentTemplateHead || !idPart.templateArgs) {
+              return false;
+            }
+            const argListOfCurrentTemplateHead =
+              currentTemplateHead.templateParameters
+                .map((param) => `${param.name}${param.pack ? "..." : ""}`)
+                .join(", ");
+            const argListString = idPart.templateArgs
+              .map((arg) => arg.raw)
+              .join(", ");
+            return argListOfCurrentTemplateHead === argListString;
+          }
+        }
+        // looks up to plain entity
+        if (!idPart.templateArgs) {
+          return true;
+        }
+        // looks up to partial specialization
+        if ("templateParams" in sym && sym.templateParams) {
+          const currentTemplateHead = currentTemplateHeads.shift();
+          if (!currentTemplateHead) {
+            return false;
+          }
+          if (
+            currentTemplateHead.templateParameters.length !==
+            sym.templateParams.length
+          ) {
+            return false;
+          }
+          if (
+            !currentTemplateHead.templateParameters.every((param, index) => {
+              return (
+                param.name === sym.templateParams![index].name &&
+                param.pack === sym.templateParams![index].pack
+              );
+            })
+          ) {
+            console.warn(
+              `Template parameter list does not match, we cannot figure whether it is the right specialization or not, give up.`,
+            );
+            console.warn(templateHeads, idParts, " VS ", sym);
+            return false;
+          }
+        }
+        if (!("templateArgs" in sym) || !sym.templateArgs) {
+          return false;
+        } else if (idPart.templateArgs.length !== sym.templateArgs.length) {
+          return false;
+        } else {
+          return idPart.templateArgs.every((arg, index) => {
+            return arg.raw === sym.templateArgs[index];
+          });
+        }
+      };
+      // now `targetNamespace` is empty, check whether remaining part of `id`
+      // matches symbol name
+      const idPart = parts[0];
+      if (!idPart) {
+        continue;
+      }
+      switch (idPart.kind) {
+        case IdPartKind.PointerToMember:
+        case IdPartKind.Computed: {
+          continue nextSymbol;
+        }
+        case IdPartKind.Destructor:
+        case IdPartKind.Identifier: {
+          if (idPart.value === sym.name && matchTemplate(idPart)) {
+            if (parts.length === 1) {
+              return [sym];
+            }
+            if (!("members" in sym) || !sym.members) {
+              // might be a forward declaration
+              continue nextSymbol;
+            }
+            const inner = this.lookupIdImpl(
+              parts.slice(1),
+              currentTemplateHeads,
+              [],
+              sym.members,
+            );
+            if (inner) {
+              return [...inner, sym];
+            } else {
+              continue nextSymbol;
+            }
+          } else {
+            continue nextSymbol;
+          }
+        }
+        case IdPartKind.Operator:
+        case IdPartKind.UDL:
+        case IdPartKind.Conversion: {
+          if (
+            "operator" in sym &&
+            idPart.value === sym.operator &&
+            matchTemplate(idPart)
+          ) {
+            return [sym];
+          } else {
+            continue nextSymbol;
+          }
+        }
+        default: {
+          const _exhaustiveCheck: never = idPart.kind;
+          this.die(`Unknown IdPartKind: ${(idPart as any).kind}`);
+        }
+      }
+      this.die(`unreachable`);
+    }
+    return null;
   }
 
   /**
@@ -2560,6 +2784,11 @@ export class Parser {
       // exception-specifier, constraint or contract, must be a ctor declaration
       return true;
     }
+    if (this.isP(";") && mayInLineCtor) {
+      // `struct S { S (some_id); };` must be ctor declaration,
+      // otherwise the data member types to the class itself (ill-formed)
+      return true;
+    }
     this.die(
       `Disambiguate failure: cannot determine whether current declaration is a constructor`,
     );
@@ -2587,6 +2816,25 @@ export class Parser {
     })();
   }
 
+  /** prevent member declaration pushed into `builtSymbols` */
+  private enterMemberScope(): Disposable {
+    const self = this;
+    const oldScopeState = self.context.scopeState;
+    const oldNsStack = self.context.nsStack;
+    self.context = produce(self.context, (ctx) => {
+      ctx.nsStack = [];
+      ctx.scopeState = "member";
+    });
+    return {
+      [Symbol.dispose]() {
+        self.context = produce(self.context, (ctx) => {
+          ctx.nsStack = oldNsStack as Draft<NamespaceInfo[]>;
+          ctx.scopeState = oldScopeState;
+        });
+      },
+    };
+  }
+
   private buildTemplateParams(params: TemplateInfo): TemplateParameter[] {
     return params.templateParameters.map((p) => ({
       raw: p.raw,
@@ -2603,18 +2851,42 @@ export class Parser {
       ExtractKind<SymbolEntry, Kind>,
       Exclude<keyof SymbolEntryBase, "raw" | "name"> | "kind"
     >,
-  ): SymbolEntry {
-    return {
+  ): ExtractKind<SymbolEntry, Kind> {
+    const result = {
       kind,
       ...info,
       header: this.filename,
       namespace: [...this.context.nsStack],
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
-    } as SymbolEntry;
+    } as ExtractKind<SymbolEntry, Kind>;
+    if (this.context.scopeState === "namespace") {
+      this.context = produce(this.context, (ctx) => {
+        ctx.builtSymbols.push(result);
+      });
+    }
+    return result;
   }
+
+  private removeTemplateArgsFromId(idExpr: IdExpressionInfo): IdExpressionInfo {
+    const clone = [...idExpr.parts];
+    const lastPart: IdExpressionPartInfo | { value?: undefined } = {
+      ...clone.pop()!,
+    };
+    this.assert(
+      lastPart.value,
+      `Cannot call removeTemplateArgsFromId on a computed type-id`,
+    );
+    lastPart.templateArgs = null;
+    return {
+      name: `${idExpr.fromGlobal ? "::" : ""}${clone.map((p) => p.name + "::").join("")}${lastPart.value}`,
+      fromGlobal: idExpr.fromGlobal,
+      parts: [...clone, lastPart],
+    };
+  }
+
   private buildNestedSymbol<Kind extends Extract<SymbolKind, `class${string}`>>(
     kind: Kind,
-    template: TemplateInfo | null,
+    templateInfo: TemplateInfo | null,
     id: IdExpressionInfo,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
@@ -2625,6 +2897,7 @@ export class Parser {
       id.parts.length > 0,
       "id-expression in a class declaration should have at least one part",
     );
+    const idExprWithoutTemplateArgs = this.removeTemplateArgsFromId(id);
     if (id.parts.length === 1) {
       const info2 = info as any;
       switch (kind) {
@@ -2637,28 +2910,68 @@ export class Parser {
         case "classTemplate": {
           return this.buildSymbol("classTemplate", {
             name: id.name,
-            templateParams: this.buildTemplateParams(template!),
-            templateRequires: template!.requiresClause,
+            templateParams: this.buildTemplateParams(templateInfo!),
+            templateRequires: templateInfo!.requiresClause,
             ...info2,
           });
         }
         case "classFullSpecialization": {
           return this.buildSymbol("classFullSpecialization", {
-            name: id.name,
+            name: idExprWithoutTemplateArgs.name,
             ...info2,
           });
         }
         case "classPartialSpecialization": {
           return this.buildSymbol("classPartialSpecialization", {
-            name: id.name,
-            templateParams: this.buildTemplateParams(template!),
-            templateRequires: template!.requiresClause,
+            name: idExprWithoutTemplateArgs.name,
+            templateParams: this.buildTemplateParams(templateInfo!),
+            templateRequires: templateInfo!.requiresClause,
             ...info2,
           });
         }
       }
     } else {
-      this.die(`Unsupported nested name in class declaration: ${id.name}`);
+      this.assert(
+        this.context.scopeState === "namespace",
+        "The parsing of nested class declaration only works in namespace scope",
+      );
+      const [forwardDeclSymbol, ...scopeSymbols] =
+        this.lookupId(
+          idExprWithoutTemplateArgs,
+          templateInfo,
+          `building nested symbol`,
+        ) ?? [];
+      if (!forwardDeclSymbol) {
+        this.die(
+          `Cannot find parent symbol for nested class declaration: ${id.name}`,
+        );
+      }
+      let currentSymbol: SymbolEntry & { members: ClassMemberEntry[] | null };
+      {
+        using enterMemberScope = this.enterMemberScope();
+        const name = idExprWithoutTemplateArgs.parts.at(-1)!.name;
+        currentSymbol = this.buildSymbol(
+          kind as "class",
+          {
+            name,
+            templateParams: templateInfo
+              ? this.buildTemplateParams(templateInfo)
+              : void 0,
+            templateRequires: templateInfo?.requiresClause,
+            ...info,
+          } as any,
+        );
+      }
+      for (const memberSym of scopeSymbols) {
+        currentSymbol = {
+          ...(memberSym as any),
+          members: [currentSymbol as ClassMemberEntry],
+        };
+      }
+      this.context = produce(this.context, (ctx) => {
+        ctx.builtSymbols.push(currentSymbol);
+      });
+      return currentSymbol;
     }
   }
 }
