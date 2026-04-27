@@ -163,7 +163,7 @@ interface BaseSpecifierInfo {
 
 interface ClassSpecifierInfo {
   tagKind: ClassTagKind;
-  id: IdExpressionInfo;
+  id: IdExpressionInfo | null;
   baseSpecifiers: BaseSpecifierInfo[];
   /**
    * The last part of `id`'s templateArgs.
@@ -231,7 +231,8 @@ interface DeclaratorListInfo {
 interface FunctionQualifierInfo {
   const: boolean;
   volatile: boolean;
-  ref: "&" | "&&" | null;
+  cvPlaceholder: boolean;
+  ref: "&" | "&&" | "placeholder" | null;
   noexcept: boolean | ExpressionInfo;
 }
 
@@ -315,7 +316,7 @@ export class Parser {
   }
 
   /** is punctuation */
-  private isP(v: string): boolean {
+  private isP(v: Punctuation): boolean {
     return this.tok.isP(v);
   }
 
@@ -335,7 +336,7 @@ export class Parser {
   private assertId(v: string): void {
     this.assert(this.isId(v), `Expected \`${v}\``);
   }
-  private assertP(v: string): void {
+  private assertP(v: Punctuation): void {
     this.assert(this.isP(v), `Expected \`${v}\``);
   }
 
@@ -620,8 +621,9 @@ export class Parser {
     }
     const { classSpecifier, enumSpecifier } = declSpecifier;
     if (
-      classSpecifier?.useKind === "declaration" ||
-      classSpecifier?.useKind === "definition"
+      classSpecifier?.id &&
+      (classSpecifier.useKind === "declaration" ||
+        classSpecifier.useKind === "definition")
     ) {
       if (classSpecifier.tagKind === "union") {
         if (classSpecifier.id.parts.length !== 1) {
@@ -943,6 +945,7 @@ export class Parser {
     const cvQualifiers = {
       const: false,
       volatile: false,
+      placeholder: false, // @\cv{}@ in std spec
     };
     const declSpecifiers: DeclSpecifierKeyword[] = [];
     let explicit: boolean | ExpressionInfo = false;
@@ -979,9 +982,17 @@ export class Parser {
         (this.isP("::") ||
           this.isId("decltype") ||
           this.isP("[:") ||
-          this.isP("template") || // template [: M :]<T>::A
+          this.isId("template") || // template [: M :]<T>::A
           this.tok.type === TokenType.LatexEscape)
       ) {
+        if (
+          this.tok.type === TokenType.LatexEscape &&
+          this.tok.value === "@\\cv{}@"
+        ) {
+          cvQualifiers.placeholder = true;
+          this.adv();
+          continue;
+        }
         const { notAType } = readIdExprAsType();
         if (notAType) {
           break;
@@ -1047,9 +1058,10 @@ export class Parser {
     const typeString = [
       ...(cvQualifiers.const ? ["const"] : []),
       ...(cvQualifiers.volatile ? ["volatile"] : []),
+      ...(cvQualifiers.placeholder ? ["__cv"] : []),
       ...(constraint ? [constraint] : []),
       ...typeSpecifiers,
-      ...(classSpecifier ? [classSpecifier.id.name] : []),
+      ...(classSpecifier?.id ? [classSpecifier.id.name] : []),
       ...(enumSpecifier?.id ? [enumSpecifier.id.name] : []),
     ].join(" ");
     return {
@@ -1135,7 +1147,7 @@ export class Parser {
         if (this.isP("{")) {
           this.skipBalancedBrackets("{", "}");
           if (isTryBlock) {
-            this.assertP("catch");
+            this.assertId("catch");
             while (this.isId("catch")) {
               this.consumeId("catch");
               this.skipBalancedBrackets("(", ")");
@@ -1211,7 +1223,12 @@ export class Parser {
           if (s.qualifiers.volatile) {
             typeInfo += " volatile";
           }
-          if (s.qualifiers.ref) {
+          if (s.qualifiers.cvPlaceholder) {
+            typeInfo += ` __cv`;
+          }
+          if (s.qualifiers.ref === "placeholder") {
+            typeInfo += ` __ref`;
+          } else if (s.qualifiers.ref) {
             typeInfo += ` ${s.qualifiers.ref}`;
           }
           if (s.qualifiers.noexcept) {
@@ -1770,7 +1787,11 @@ export class Parser {
 
     let useKind: ClassSpecifierUseKind = "reference";
     this.tryParseAttribute();
-    const idExpr = this.readIdExpression();
+
+    let idExpr: IdExpressionInfo | null = null;
+    if (!(this.isP("{") || this.isP(":"))) {
+      idExpr = this.readIdExpression();
+    }
 
     // TODO
     // friend class A, class B;
@@ -1841,8 +1862,8 @@ export class Parser {
         contextType,
       ) && !previousSpecifiers.includes("friend");
 
-    const templateArgs = idExpr.parts.at(-1)?.templateArgs ?? null;
-    if (mayDeclare && !templateArgs) {
+    const templateArgs = idExpr?.parts.at(-1)?.templateArgs ?? null;
+    if (mayDeclare && idExpr && !templateArgs) {
       this.assert(
         idExpr.parts.at(-1)?.kind === IdPartKind.Identifier,
         "Name of class declaration or definition should be a simple identifier",
@@ -1851,11 +1872,7 @@ export class Parser {
 
     let members: ClassMemberEntry[] | null = null;
     if (mayDeclare && this.tok.isP("{")) {
-      const componentName = idExpr.parts.at(-1)?.value;
-      this.assert(
-        componentName,
-        `Class should have a name to declare its members`,
-      );
+      const componentName = idExpr?.parts.at(-1)?.value ?? null;
       using _omitRecord = this.enterMemberScope();
       members = this.parseMemberSpecification(componentName);
       useKind = "definition";
@@ -1881,7 +1898,7 @@ export class Parser {
    * Parse
    */
   private parseMemberSpecification(
-    scopeClassName: string,
+    scopeClassName: string | null,
   ): ClassMemberEntry[] | null {
     this.consumeP("{");
     if (this.tryReadUnspecifiedMemberOrEnumerator()) {
@@ -1927,6 +1944,10 @@ export class Parser {
 
   private parseParameterDeclaration(): ParameterInfo {
     const startLoc = this.tok.loc;
+    if (this.isId("this")) {
+      // deducing-this
+      this.consumeId("this");
+    }
     const declSpec = this.parseDeclarationSpecifiers({
       scopeClassName: null,
       contextType: DeclarationContextType.Parameter,
@@ -2002,6 +2023,7 @@ export class Parser {
     const qualifiers: FunctionQualifierInfo = {
       const: false,
       volatile: false,
+      cvPlaceholder: false,
       ref: null,
       noexcept: false,
     };
@@ -2012,12 +2034,24 @@ export class Parser {
       } else if (this.isId("volatile")) {
         qualifiers.volatile = true;
         this.consumeId("volatile");
+      } else if (
+        this.tok.type === TokenType.LatexEscape &&
+        this.tok.value === "@\\cv{}@"
+      ) {
+        qualifiers.cvPlaceholder = true;
+        this.adv();
       } else {
         break;
       }
     }
     if (this.isP("&") || this.isP("&&")) {
       qualifiers.ref = this.tok.value as "&" | "&&";
+      this.adv();
+    } else if (
+      this.tok.type === TokenType.LatexEscape &&
+      this.tok.value === "@\\placeholder{ref}@"
+    ) {
+      qualifiers.ref = "placeholder";
       this.adv();
     }
     if (this.isId("noexcept")) {
@@ -2480,7 +2514,10 @@ export class Parser {
     allSymbols: readonly Immutable<SymbolEntry>[],
   ): Immutable<SymbolEntry>[] | null {
     nextSymbol: for (const sym of allSymbols) {
-      if (idParts[0]?.name.includes("lazy_split_view") && sym.name.includes("lazy_split_view")) {
+      if (
+        idParts[0]?.name.includes("lazy_split_view") &&
+        sym.name.includes("lazy_split_view")
+      ) {
         debugger;
       }
       const parts = [...idParts];
@@ -2789,6 +2826,13 @@ export class Parser {
       // otherwise the data member types to the class itself (ill-formed)
       return true;
     }
+    if (this.isP("=")) {
+      const nextTok = this.nextTok();
+      if (nextTok.isId("default") || nextTok.isId("delete")) {
+        // defaulted or deleted special member function, must be a ctor declaration
+        return true;
+      }
+    }
     this.die(
       `Disambiguate failure: cannot determine whether current declaration is a constructor`,
     );
@@ -2951,13 +2995,17 @@ export class Parser {
         using enterMemberScope = this.enterMemberScope();
         const name = idExprWithoutTemplateArgs.parts.at(-1)!.name;
         currentSymbol = this.buildSymbol(
-          kind as "class",
+          forwardDeclSymbol.kind as "class",
           {
             name,
-            templateParams: templateInfo
-              ? this.buildTemplateParams(templateInfo)
-              : void 0,
-            templateRequires: templateInfo?.requiresClause,
+            templateParams:
+              "templateParams" in forwardDeclSymbol && templateInfo
+                ? this.buildTemplateParams(templateInfo)
+                : void 0,
+            templateRequires:
+              "templateRequires" in forwardDeclSymbol && templateInfo
+                ? templateInfo.requiresClause
+                : void 0,
             ...info,
           } as any,
         );

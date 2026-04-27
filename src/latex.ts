@@ -76,13 +76,44 @@ const PATCHES: Record<string, [string, string][]> = {
       `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y\n`,
       `    constexpr @\\exposid{deduced-vec-t}@<V> lerp(const V& x, const @\\exposid{deduced-vec-t}@<V>& y,\n`,
     ],
+    [
+      `    static constexpr array<result_type, @\\exposid{array-size>}@ round_consts;`,
+      `    static constexpr array<result_type, @\\exposid{array-size}@> round_consts;`,
+    ]
   ],
   "ranges.tex": [
     [
       `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>`,
       `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>;`,
     ],
+    // This is our problem
+    [
+      `    @\\exposconcept{tuple-like}@<T> && N < tuple_size_v<T> &&`,
+      `    @\\exposconcept{tuple-like}@<T> && (N < tuple_size_v<T>) &&`,
+    ]
   ],
+  "exec.tex": [
+    [
+      `    void set_stopped() && noexcept\n`,
+      `    void set_stopped() && noexcept {\n`,
+    ]
+  ],
+  "containers.tex": [
+    [
+      `  template<ranges::@\\libconcept{input_range}@ R, class Compare = less<@\\exposid{range-key-type}@<R>,`,
+      `  template<ranges::@\\libconcept{input_range}@ R, class Compare = less<@\\exposid{range-key-type}@<R>>,`
+    ]
+  ],
+  "threads.tex": [
+    [
+      `    constexpr @\\placeholdernc{floating-poin-type}@t fetch_min(@\\placeholdernc{floating-point-type}@,`,
+      `    constexpr @\\placeholdernc{floating-point-type}@ fetch_min(@\\placeholdernc{floating-point-type}@,`
+    ],
+    [
+      `      bool wait_until(Lock& lock, chrono::time_point<Clock, Duration abs_time,`,
+      `      bool wait_until(Lock& lock, chrono::time_point<Clock, Duration> abs_time,`
+    ]
+  ]
 };
 
 const REQUIRED_MISSING_INCLUDES: Record<string, string[]> = {

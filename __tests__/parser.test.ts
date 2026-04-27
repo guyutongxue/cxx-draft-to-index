@@ -92,24 +92,3 @@ namespace std::ranges {
     name: "StreamExtractable",  
   });
 })
-
-test("debug", () => {
-  const code = String.raw`
-namespace std::ranges {
-  template<@\libconcept{input_range}@ V, @\libconcept{indirect_unary_predicate}@<iterator_t<V>> Pred>
-    requires @\libconcept{view}@<V> && is_object_v<Pred>
-  template<bool Const>
-  class filter_view<V, Pred>::@\exposid{sentinel}@ {
-  public:
-    @\exposid{sentinel}@() = default;
-    constexpr @\exposid{sentinel}@(@\exposid{sentinel}@<!Const> other)
-      requires Const && @\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\exposidnc{Base}@>>
-
-    constexpr sentinel_t<@\exposidnc{Base}@> base() const;
-
-  };
-}`
-  const lexer = new Lexer(code);
-  const parser = new Parser(lexer, "<input>");
-  const symbols = parser.parseTopLevel();
-})

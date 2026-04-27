@@ -61,6 +61,7 @@ const MULTICHAR_PUNCTS = [
   "...",
   "<=>",
   "<<=",
+  "->*",
   "->",
   "::",
   "[:",
@@ -83,6 +84,7 @@ const MULTICHAR_PUNCTS = [
   "<<",
   "++",
   "--",
+  ".*",
 ] as const;
 
 const SINGLECHAR_PUNCTS = "{}()[]<>;:?.~!+-*/%^&|=," as const;
@@ -191,22 +193,9 @@ export class Lexer {
     const loc = this.loc;
 
     if (this.pos >= this.srcLen) {
-      return new Token({ type: TokenType.EOF, value: "", loc: this.loc });
+      return new Token({ type: TokenType.EOF, value: "@EOF@", loc: this.loc });
     }
     const c = this.ch;
-
-    // @...@ LaTeX escape
-    if (c === "@") {
-      this.advance();
-      let value = "@";
-      while (this.pos < this.srcLen && this.ch !== "@") {
-        value += this.advance();
-      }
-      if (this.pos < this.srcLen) {
-        value += this.advance();
-      }
-      return new Token({ type: TokenType.LatexEscape, value, loc });
-    }
 
     // String literal
     if (c === '"') {
@@ -247,7 +236,24 @@ export class Lexer {
         (ch >= "0" && ch <= "9")
       );
     };
-    if (c === "_" || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
+
+    if (c === "@") {
+      this.advance();
+      let value = "@";
+      while (this.pos < this.srcLen && this.ch !== "@") {
+        value += this.advance();
+      }
+      if (this.pos < this.srcLen) {
+        value += this.advance();
+      }
+      if (value.match(/^@\s*\\begin\{footnote}/)) {
+        // skip injected footnotes
+        return this.lex();
+      }
+      return new Token({ type: TokenType.LatexEscape, value, loc });
+    }
+
+    if (c === "_" || c === "@" || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")) {
       let value = "";
       while (this.pos < this.srcLen && isIdentifierPart(this.ch)) {
         value += this.advance();
@@ -262,6 +268,14 @@ export class Lexer {
             value += this.advance();
           }
         }
+      }
+      // HACK: treat sizeof... as a single identifier for easier parsing default arguments involving parameter packs
+      // e.g. template<typename... Args> void foo(int t = sizeof...(Args));
+      if (value === "sizeof" && this.getN(3) === "...") {
+        this.advance();
+        this.advance();
+        this.advance();
+        value = "sizeof...";
       }
       return new Token({ type: TokenType.Identifier, value, loc });
     }
