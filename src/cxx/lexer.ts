@@ -271,10 +271,8 @@ export class Lexer {
       }
       // HACK: treat sizeof... as a single identifier for easier parsing default arguments involving parameter packs
       // e.g. template<typename... Args> void foo(int t = sizeof...(Args));
-      if (value === "sizeof" && this.getN(3) === "...") {
-        this.advance();
-        this.advance();
-        this.advance();
+      if (value === "sizeof" && this.peek().isP("...")) {
+        this.lex(); // consume ...
         value = "sizeof...";
       }
       return new Token({ type: TokenType.Identifier, value, loc });

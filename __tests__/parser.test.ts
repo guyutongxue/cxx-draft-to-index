@@ -74,7 +74,7 @@ namespace std {
     name: "__c_atexit_handler",
     languageLinkage: "C",
   });
-})
+});
 
 test("complex concept definition", () => {
   const code = String.raw`
@@ -83,12 +83,28 @@ namespace std::ranges {
     concept StreamExtractable = requires(basic_istream<CharT, Traits>& is, Val& t) {
       is >> t;
     };
-}`
+}`;
   const lexer = new Lexer(code);
   const parser = new Parser(lexer, "<input>");
   const symbols = parser.parseTopLevel();
   expect(symbols[0]).toMatchObject({
     kind: "concept",
-    name: "StreamExtractable",  
+    name: "StreamExtractable",
   });
-})
+});
+
+test("sizeof... correctly skipped as identifier", () => {
+  const code = String.raw`
+template<typename... Args>
+void foo(int t = sizeof...(Args));
+  `;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  expect(symbols[0]).toMatchObject({
+    kind: "functionTemplate",
+    name: "foo",
+    templateParams: [{ kind: "type", name: "Args", pack: true }],
+    parameters: [{ type: "int", name: "t", defaultArg: "sizeof...(Args)" }],
+  });
+});
