@@ -19,23 +19,6 @@ This project aims to extract structured information from C++ Committee draft pap
 - **C++ Lexer** - Tokenizes C++ source code
 - **C++ Parser** - Parses C++ syntax 
 
-## Project Structure
-
-```
-src/
-├── cpp/              # C++ language parsing
-│   ├── lexer.ts     # Tokenization
-│   ├── parser.ts    # Syntax parsing
-│   ├── pp.ts        # Preprocessor
-│   ├── latex.ts     # LaTeX replacements
-│   └── index.ts
-├── latex.ts         # LaTeX synopsis extraction
-├── types.ts         # Type definitions
-└── main.ts          # Entry point
-
-deps/draft/          # C++ draft documents and papers
-```
-
 ## Getting Started
 
 ### Prerequisites

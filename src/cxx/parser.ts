@@ -2,6 +2,7 @@ import type {
   ClassMemberEntry,
   EnumeratorEntry,
   ExtractKind,
+  NamespaceInfo,
   SymbolEntry,
   SymbolEntryBase,
   SymbolKind,
@@ -13,7 +14,7 @@ import { produce } from "immer";
 
 interface ParserContext {
   readonly linkageStack: readonly string[];
-  readonly nsStack: readonly string[];
+  readonly nsStack: readonly NamespaceInfo[];
 }
 
 interface AttributeInfo {
@@ -604,7 +605,6 @@ export class Parser {
           this.buildSymbol("union", {
             name: classSpecifier.id.name,
             raw: classSpecifier.raw + ";",
-            base: [],
             members: classSpecifier.members,
           }),
         );
@@ -616,9 +616,10 @@ export class Parser {
             "full specialization must have template args",
           );
           symbols.push(
-            this.buildSymbol("fullTemplateSpecialization", {
+            this.buildSymbol("classFullSpecialization", {
               name: this.nameWithoutTemplateArg(classSpecifier.id),
-              templateKind: "class",
+              classKey: classSpecifier.tagKind,
+              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
               raw: this.lexer.range(startLoc, this.tok.loc),
               templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
               members: classSpecifier.members,
@@ -626,9 +627,10 @@ export class Parser {
           );
         } else if (classSpecifier.templateArgs) {
           symbols.push(
-            this.buildSymbol("partialTemplateSpecialization", {
+            this.buildSymbol("classPartialSpecialization", {
               name: this.nameWithoutTemplateArg(classSpecifier.id),
-              templateKind: "class",
+              classKey: classSpecifier.tagKind,
+              base: classSpecifier.baseSpecifiers.map((b) => b.raw),
               raw: this.lexer.range(startLoc, this.tok.loc),
               templateParams,
               templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
@@ -644,9 +646,10 @@ export class Parser {
             symbols.push(
               this.buildSymbol("classTemplate", {
                 name: classSpecifier.id.name,
+                classKey: classSpecifier.tagKind,
+                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateParams,
-                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
                 members: classSpecifier.members,
               }),
             );
@@ -659,8 +662,9 @@ export class Parser {
           symbols.push(
             this.buildSymbol("class", {
               name: classSpecifier.id.name,
-              raw: classSpecifier.raw + ";",
+              classKey: classSpecifier.tagKind,
               base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+              raw: classSpecifier.raw + ";",
               members: classSpecifier.members,
             }),
           );
@@ -719,18 +723,27 @@ export class Parser {
           declarator.function.trailingReturnType
         ) {
           // must be deduction guide e.g. C(T) -> C<T>
-          symbols.push(
-            this.buildSymbol("deductionGuide", {
-              name: declarator.idExpr.name,
-              raw: this.lexer.range(startLoc, this.tok.loc),
-              parameters,
-              targetType: declarator.function.trailingReturnType,
-              templateParams: templateInfo
-                ? this.buildTemplateParams(templateInfo)
-                : void 0,
-              templateRequires: templateInfo?.requiresClause,
-            }),
-          );
+          if (templateInfo) {
+            symbols.push(
+              this.buildSymbol("deductionGuideTemplate", {
+                name: declarator.idExpr.name,
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                parameters,
+                targetType: declarator.function.trailingReturnType,
+                templateParams: this.buildTemplateParams(templateInfo),
+                templateRequires: templateInfo.requiresClause,
+              }),
+            );
+          } else {
+            symbols.push(
+              this.buildSymbol("deductionGuide", {
+                name: declarator.idExpr.name,
+                raw: this.lexer.range(startLoc, this.tok.loc),
+                parameters,
+                targetType: declarator.function.trailingReturnType,
+              }),
+            );
+          }
           break;
         }
         if (templateInfo) {
@@ -744,12 +757,19 @@ export class Parser {
               `full template specialization should have template args`,
             );
             symbols.push(
-              this.buildSymbol("fullTemplateSpecialization", {
+              this.buildSymbol("functionFullSpecialization", {
                 name: this.nameWithoutTemplateArg(declarator.idExpr),
-                templateKind: "function",
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateArgs: idLastPart.templateArgs.map((a) => a.raw),
-                members: null,
+                operator,
+                parameters,
+                returnType,
+                isTrailingReturnType,
+                constexpr,
+                explicit,
+                friend,
+                variadic,
+                signatureRequires: declarator.function.constraint?.raw || null,
               }),
             );
           } else {
@@ -805,15 +825,14 @@ export class Parser {
           );
         }
       } else {
-        const raw = declSpecifier.raw + " " + declarator.raw + ";";
-        const entry = {
-          name: declarator.idExpr.name,
-          raw,
-          type: declarator.typeInfo,
-          constexpr: declSpecifier.declSpecifiers.includes("constexpr"),
-          extern: declSpecifier.declSpecifiers.includes("extern"),
-          inline: declSpecifier.declSpecifiers.includes("inline"),
-        };
+        const type = declarator.typeInfo;
+        const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
+        const inline = declSpecifier.declSpecifiers.includes("inline");
+        const extern =
+          declSpecifier.declSpecifiers.includes("extern") ||
+          (!inline && this.context.linkageStack.length > 0);
+        const raw = this.lexer.range(startLoc, this.tok.loc);
+
         if (templateInfo) {
           if (templateInfo.fullSpecialization) {
             this.assert(
@@ -821,23 +840,27 @@ export class Parser {
               `full template specialization should have template args`,
             );
             symbols.push(
-              this.buildSymbol("fullTemplateSpecialization", {
+              this.buildSymbol("variableFullSpecialization", {
                 name: this.nameWithoutTemplateArg(declarator.idExpr),
-                templateKind: "variable",
                 templateArgs: idLastPart?.templateArgs.map((a) => a.raw),
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                members: null,
+                type,
+                raw,
+                constexpr,
+                extern,
+                inline,
               }),
             );
           } else if (partialSpecialization) {
             symbols.push(
-              this.buildSymbol("partialTemplateSpecialization", {
+              this.buildSymbol("variablePartialSpecialization", {
                 name: this.nameWithoutTemplateArg(declarator.idExpr),
-                templateKind: "variable",
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateArgs: partialSpecialization.map((a) => a.raw),
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                members: null,
+                raw,
+                type,
+                constexpr,
+                extern,
+                inline,
               }),
             );
           } else {
@@ -849,7 +872,12 @@ export class Parser {
             }
             symbols.push(
               this.buildSymbol("variableTemplate", {
-                ...entry,
+                name: declarator.idExpr.name,
+                type,
+                raw,
+                constexpr,
+                extern,
+                inline,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
               }),
@@ -862,7 +890,16 @@ export class Parser {
             );
             continue;
           }
-          symbols.push(this.buildSymbol("variable", entry));
+          symbols.push(
+            this.buildSymbol("variable", {
+              name: declarator.idExpr.name,
+              type,
+              constexpr,
+              extern,
+              inline,
+              raw: declSpecifier.raw + " " + declarator.raw + ";",
+            }),
+          );
         }
       }
     }
@@ -1296,16 +1333,19 @@ export class Parser {
 
     this.tryParseAttribute();
 
-    let name = "";
+    let nsInfo: NamespaceInfo[] = [];
     while (this.isIdentifierOrLaTeX()) {
-      name += this.resolved(this.tok);
+      nsInfo.push({
+        name: this.resolved(this.tok),
+        inline,
+      });
       this.adv();
       if (this.isP("::")) {
-        name += "::";
         this.consumeP("::");
         // namespace X::inline Y { ... }
         if (this.isId("inline")) {
           this.consumeId("inline");
+          inline = true;
         }
       } else {
         break;
@@ -1313,7 +1353,12 @@ export class Parser {
     }
 
     // namespace X = Y;
-    if (this.isP("=")) {
+    if (nsInfo.length >= 0 && this.isP("=")) {
+      this.assert(
+        nsInfo.every((n) => n.name !== null && !inline),
+        `Namespace alias cannot be inline or unnamed`,
+      );
+      const name = nsInfo.map((n) => n.name).join("::");
       this.consumeP("=");
       const targetExpr = this.readIdExpression();
       this.consumeP(";");
@@ -1328,21 +1373,25 @@ export class Parser {
     }
 
     // namespace { ... }
-    if (!name) {
-      this.unimplemented("anonymous namespaces");
+    if (nsInfo.length === 0) {
+      this.tryParseAttribute();
+      nsInfo.push({
+        name: null,
+        inline: false,
+      });
     }
 
     this.consumeP("{");
 
     this.context = produce(this.context, (ctx) => {
-      ctx.nsStack.push(name);
+      ctx.nsStack.push(...nsInfo);
     });
 
     while (!this.isP("}")) {
       symbols.push(...this.parseExternalDeclaration());
     }
     this.context = produce(this.context, (ctx) => {
-      ctx.nsStack.pop();
+      ctx.nsStack.splice(-nsInfo.length, nsInfo.length);
     });
     this.consumeP("}");
     return symbols;
@@ -2549,8 +2598,7 @@ export class Parser {
       kind,
       ...info,
       header: this.filename,
-      namespace: this.context.nsStack.join("::"),
-      // TODO inlineUnspecifiedNamespace
+      namespace: [...this.context.nsStack],
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as SymbolEntry;
   }

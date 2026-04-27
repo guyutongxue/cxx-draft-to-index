@@ -1,11 +1,14 @@
+export interface NamespaceInfo {
+  name: string | null; // null for anonymous namespace
+  inline: boolean;
+}
+
 export interface SymbolEntryBase {
   header: string;
-  namespace: string;
-  // indicates a CPO
-  inlineUnspecifiedNamespace?: boolean;
+  namespace: NamespaceInfo[];
   raw: string;
   name: string;
-  languageLinkage: "C" | "C++" | null;
+  languageLinkage: string | null;
 }
 
 export interface Parameter {
@@ -30,8 +33,14 @@ export interface FunctionLikeMacroSymbolEntry extends SymbolEntryBase {
 }
 
 export interface ClassSymbolEntry extends SymbolEntryBase {
-  kind: "class" | "struct" | "union";
-  base: string[]; // raw base specifiers for now, [] for union
+  kind: "class";
+  classKey: "class" | "struct";
+  base: string[];
+  members: ClassMemberEntry[] | null;
+}
+
+export interface UnionSymbolEntry extends SymbolEntryBase {
+  kind: "union";
   members: ClassMemberEntry[] | null;
 }
 
@@ -85,6 +94,12 @@ export interface UsingDeclarationSymbolEntry extends SymbolEntryBase {
   target: string; // e.g. "std::foo"
 }
 
+// using enum foo::Bar;
+export interface UsingEnumSymbolEntry extends SymbolEntryBase {
+  kind: "usingEnum";
+  target: string; // e.g. "foo::Bar"
+}
+
 // using namespace literals::chrono_literals
 export interface UsingDirectiveSymbolEntry extends SymbolEntryBase {
   kind: "usingDirective";
@@ -97,31 +112,21 @@ export interface NamespaceAliasSymbolEntry extends SymbolEntryBase {
   targetNamespace: string; // e.g. "ranges::views"
 }
 
-export interface PartialTemplateSpecializationSymbolEntry extends SymbolEntryBase, TemplateInfo {
-  kind: "partialTemplateSpecialization";
-  templateKind: "class" | "variable";
-  templateArgs: string[]; // raw template argument strings for now
-  members: ClassMemberEntry[] | null;
-}
-export interface FullTemplateSpecializationSymbolEntry extends SymbolEntryBase {
-  kind: "fullTemplateSpecialization";
-  templateKind: "class" | "function" | "variable";
-  templateArgs: string[]; // raw template argument strings for now
-  members: ClassMemberEntry[] | null;
-}
-
-export interface DeductionGuideSymbolEntry
-  extends SymbolEntryBase, Partial<TemplateInfo> {
+export interface DeductionGuideSymbolEntry extends SymbolEntryBase {
   kind: "deductionGuide";
   parameters: Parameter[];
   targetType: string;
 }
 
-type TemplateInfo = {
-  templateParams: TemplateParameter[]; // raw strings for now
+interface TemplateInfo {
+  templateParams: TemplateParameter[];
   // template <params...> requires <constraints> <decl>
   templateRequires?: string | null;
 };
+
+interface SpecializationInfo {
+  templateArgs: string[]; // raw template argument strings
+}
 
 type Computed<T> = { [K in keyof T]: T[K] };
 
@@ -135,40 +140,76 @@ type Templatize<T extends SymbolEntryBase> = Computed<
     : never
 >;
 
-interface TypeAliasTemplateSymbolEntry extends Templatize<
+type FullSpecialize<T extends SymbolEntryBase> = Computed<
+  T extends {
+    kind: infer Kind extends string;
+  }
+    ? Omit<T, "kind"> & {
+        kind: `${Kind}FullSpecialization`;
+      } & SpecializationInfo
+    : never
+>;
+type PartialSpecialize<T extends SymbolEntryBase> = Computed<
+  T extends {
+    kind: infer Kind extends string;
+  }
+    ? Omit<T, "kind"> & {
+        kind: `${Kind}PartialSpecialization`;
+      } & TemplateInfo & SpecializationInfo
+    : never
+>;
+
+export interface TypeAliasTemplateSymbolEntry extends Templatize<
   TypeAliasSymbolEntry & { syntax: "using" }
 > {}
-
 export interface FunctionTemplateSymbolEntry extends Templatize<FunctionSymbolEntry> {}
 export interface ClassTemplateSymbolEntry extends Templatize<
   ClassSymbolEntry & { kind: "class" | "struct" }
 > {}
 export interface VariableTemplateSymbolEntry extends Templatize<VariableSymbolEntry> {}
+export interface DeductionGuideTemplateSymbolEntry extends Templatize<DeductionGuideSymbolEntry> {}
 
 export interface ConceptSymbolEntry extends TemplateInfo, SymbolEntryBase {
   kind: "concept";
 }
 
+export interface FunctionFullSpecializationSymbolEntry extends FullSpecialize<FunctionSymbolEntry> {}
+export interface ClassFullSpecializationSymbolEntry extends FullSpecialize<
+  ClassSymbolEntry
+> {}
+export interface VariableFullSpecializationSymbolEntry extends FullSpecialize<VariableSymbolEntry> {}
+
+export interface ClassPartialSpecializationSymbolEntry extends PartialSpecialize<
+  ClassSymbolEntry
+> {}
+export interface VariablePartialSpecializationSymbolEntry extends PartialSpecialize<VariableSymbolEntry> {}
+
 export type SymbolEntry =
   | MacroSymbolEntry
   | FunctionLikeMacroSymbolEntry
   | ClassSymbolEntry
+  | UnionSymbolEntry
   | EnumSymbolEntry
   | TypeAliasSymbolEntry
   | VariableSymbolEntry
   | FunctionSymbolEntry
   | FriendTypeSymbolEntry
   | UsingDeclarationSymbolEntry
+  | UsingEnumSymbolEntry
   | UsingDirectiveSymbolEntry
   | NamespaceAliasSymbolEntry
-  | PartialTemplateSpecializationSymbolEntry
-  | FullTemplateSpecializationSymbolEntry
+  | DeductionGuideSymbolEntry
   | TypeAliasTemplateSymbolEntry
   | FunctionTemplateSymbolEntry
   | ClassTemplateSymbolEntry
   | VariableTemplateSymbolEntry
   | ConceptSymbolEntry
-  | DeductionGuideSymbolEntry;
+  | DeductionGuideTemplateSymbolEntry
+  | FunctionFullSpecializationSymbolEntry
+  | ClassFullSpecializationSymbolEntry
+  | VariableFullSpecializationSymbolEntry
+  | ClassPartialSpecializationSymbolEntry
+  | VariablePartialSpecializationSymbolEntry;
 
 export type ClassMemberEntry = Exclude<
   SymbolEntry,
