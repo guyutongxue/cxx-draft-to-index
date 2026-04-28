@@ -756,6 +756,20 @@ export class Parser {
         declSpecifier.declSpecifiers.includes("extern") ||
         (!inline && this.context.linkageStack.length > 0);
       this.assert(declarator.idExpr, `Declarator must have an id-expression`);
+      if (declSpecifier.declSpecifiers.includes("typedef")) {
+        this.assert(!constexpr && !static_ && !inline && !extern, "typedef cannot be constexpr/static/inline/extern");
+        this.assert(!templateInfo, "typedef cannot be a template");
+        symbols.push(
+          this.buildSymbol("typeAlias", {
+            syntax: "typedef",
+            name: declarator.idExpr.name,
+            type: declarator.typeInfo,
+            raw: declSpecifier.raw + " " + declarator.raw + ";",
+            access: null,
+          })
+        );
+      }
+
       const idLastPart = declarator.idExpr.parts.at(-1)!;
       const partialSpecialization = templateInfo && idLastPart.templateArgs;
       if (declarator.idExpr.parts.length !== 1) {
@@ -1603,7 +1617,10 @@ export class Parser {
         `Name introduced by using-alias-declaration should be identifier`,
       );
       this.consumeP("=");
+      const definitionStartLoc = this.tok.loc;
       this.skipBalancedTokensUntilPunct([";"], false);
+      const definitionEndLoc = this.tok.loc;
+      const typeString = this.lexer.range(definitionStartLoc, definitionEndLoc);
       this.consumeP(";");
       if (templateInfo) {
         return [
@@ -1611,6 +1628,7 @@ export class Parser {
             name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             syntax: "using",
+            type: typeString,
             templateParams: this.buildTemplateParams(templateInfo),
             access,
           }),
@@ -1621,6 +1639,7 @@ export class Parser {
             name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             syntax: "using",
+            type: typeString,
             access,
           }),
         ];

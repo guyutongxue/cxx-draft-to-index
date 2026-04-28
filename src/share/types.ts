@@ -71,6 +71,7 @@ export interface EnumSymbolEntry extends SymbolEntryBase {
 export interface TypeAliasSymbolEntry extends SymbolEntryBase {
   kind: "typeAlias";
   syntax: "typedef" | "using";
+  type: string;
 }
 
 export interface VariableSymbolEntry extends SymbolEntryBase {

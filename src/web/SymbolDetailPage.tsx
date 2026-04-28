@@ -86,7 +86,7 @@ export function SymbolDetailPage() {
   for (let i = 0; i < chain.length; i++) {
     const s = chain[i].symbol;
     if ("templateParams" in s) {
-      templateHeads.push(s.templateParams.map((tp) => tp.raw).join(","));
+      templateHeads.push(s.templateParams.map((tp) => tp.raw).join(", "));
     }
     if (i < chain.length - 1) {
       prefix += s.name;
@@ -107,7 +107,7 @@ export function SymbolDetailPage() {
     <div className="detail-page">
       <Breadcrumb chain={chain} />
       {parentSymbol && parentId && (
-        <div className="symbol-detail-section">
+        <div>
           <button
             className="back-btn"
             onClick={() => {
