@@ -11,7 +11,7 @@ import type {
   Parameter,
   TemplateParameter,
 } from "../types";
-import { SymbolCardContent } from "./SymbolCard";
+import { getKindBadge, SymbolCardContent } from "./SymbolCard";
 import { SymbolName } from "./SymbolName";
 import { computeMemberLocalId } from "./symbol_id";
 
@@ -66,44 +66,6 @@ function isVariable(s: SymbolEntry): s is VariableSymbolEntry {
     s.kind === "variableFullSpecialization" ||
     s.kind === "variablePartialSpecialization"
   );
-}
-
-function getKindLabel(kind: SymbolKind, entry: SymbolEntry): string {
-  if (kind === "class" && "classKey" in entry) return entry.classKey;
-  if (kind === "classTemplate" && "classKey" in entry)
-    return `${entry.classKey} template`;
-  if (kind === "classFullSpecialization" && "classKey" in entry)
-    return `${entry.classKey} full specialization`;
-  if (kind === "classPartialSpecialization" && "classKey" in entry)
-    return `${entry.classKey} partial specialization`;
-
-  const labels: Record<string, string> = {
-    union: "union",
-    enum: "enum",
-    typeAlias: "type alias",
-    variable: "variable",
-    function: "function",
-    friendType: "friend type declaration",
-    usingDeclaration: "using declaration",
-    usingEnum: "using enum declaration",
-    usingDirective: "using directive",
-    namespaceAlias: "namespace alias",
-    deductionGuide: "deduction guide",
-    typeAliasTemplate: "type alias template",
-    functionTemplate: "function template",
-    classTemplate: "class template",
-    variableTemplate: "variable template",
-    concept: "concept",
-    deductionGuideTemplate: "deduction guide template",
-    functionFullSpecialization: "function full specialization",
-    variableFullSpecialization: "variable full specialization",
-    classFullSpecialization: "class full specialization",
-    classPartialSpecialization: "class partial specialization",
-    variablePartialSpecialization: "variable partial specialization",
-    macro: "macro",
-    functionLikeMacro: "function-like macro",
-  };
-  return labels[kind] ?? kind;
 }
 
 function ParamTable({
@@ -187,6 +149,7 @@ export function SymbolDetail({
   onMemberClick,
 }: SymbolDetailProps) {
   const ns = namespacePath(symbol.namespace);
+  const badge = getKindBadge(symbol.kind, symbol);
 
   const showTemplate = isTemplate(symbol.kind) && "templateParams" in symbol;
   const showSpecialization =
@@ -206,9 +169,7 @@ export function SymbolDetail({
         {ns && <div className="symbol-detail-namespace">namespace {ns}</div>}
         <div className="symbol-detail-badges">
           <span className="badge badge-tag">&lt;{headerName}&gt;</span>
-          <span className="badge badge-default">
-            {getKindLabel(symbol.kind, symbol)}
-          </span>
+          <span className={`badge ${badge.className}`}>{badge.text}</span>
           {symbol.languageLinkage && (
             <span className="badge badge-tag">
               extern "{symbol.languageLinkage}"

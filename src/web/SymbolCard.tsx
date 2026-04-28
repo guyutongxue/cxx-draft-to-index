@@ -10,15 +10,16 @@ export interface SymbolCardProps {
 }
 
 function namespacePath(ns: NamespaceInfo[]): string {
-  return ns.map((n) => n.name ?? "{anonymous}").join("::");
+  return ns.map((n) => n.name ?? "⟨anonymous⟩").join("::");
 }
 
 interface BadgeInfo {
   className: string;
   text: string;
+  shortText?: string;
 }
 
-function getKindBadge(kind: SymbolKind, entry?: SymbolEntry): BadgeInfo {
+export function getKindBadge(kind: SymbolKind, entry?: SymbolEntry): BadgeInfo {
   if (kind === "class" && entry && "classKey" in entry) {
     return { className: `badge-${entry.classKey}`, text: entry.classKey };
   }
@@ -26,71 +27,96 @@ function getKindBadge(kind: SymbolKind, entry?: SymbolEntry): BadgeInfo {
     return {
       className: `badge-${entry.classKey}`,
       text: `${entry.classKey} template`,
+      shortText: `${entry.classKey} tmpl.`,
     };
   }
   if (kind === "classFullSpecialization" && entry && "classKey" in entry) {
     return {
       className: `badge-${entry.classKey}`,
-      text: `${entry.classKey} spec.`,
+      text: `${entry.classKey} specialization`,
+      shortText: `${entry.classKey} spec.`,
     };
   }
   if (kind === "classPartialSpecialization" && entry && "classKey" in entry) {
     return {
       className: `badge-${entry.classKey}`,
-      text: `${entry.classKey} part. spec.`,
+      text: `${entry.classKey} partial specialization`,
+      shortText: `${entry.classKey} partial spec.`,
     };
   }
-
+  
   const map: Record<string, BadgeInfo> = {
     union: { className: "badge-union", text: "union" },
     enum: { className: "badge-enum", text: "enum" },
     typeAlias: { className: "badge-typeAlias", text: "type alias" },
     variable: { className: "badge-variable", text: "variable" },
     function: { className: "badge-function", text: "function" },
-    friendType: { className: "badge-friend", text: "friend type" },
-    usingDeclaration: { className: "badge-using", text: "using" },
-    usingEnum: { className: "badge-using", text: "using enum" },
-    usingDirective: { className: "badge-using", text: "using ns" },
-    namespaceAlias: { className: "badge-namespace", text: "ns alias" },
+    friendType: {
+      className: "badge-friend",
+      text: "friend type declaration",
+      shortText: "friend type",
+    },
+    usingDeclaration: {
+      className: "badge-using",
+      text: "using declaration",
+      shortText: "using",
+    },
+    usingEnum: {
+      className: "badge-using",
+      text: "using enum declaration",
+      shortText: "using enum",
+    },
+    usingDirective: {
+      className: "badge-using",
+      text: "using directive",
+      shortText: "using ns",
+    },
+    namespaceAlias: {
+      className: "badge-namespace",
+      text: "namespace alias",
+      shortText: "ns alias",
+    },
     deductionGuide: { className: "badge-deduction", text: "deduction guide" },
-    concept: { className: "badge-concept", text: "concept" },
-    macro: { className: "badge-macro", text: "macro" },
-    functionLikeMacro: { className: "badge-macro", text: "func-like macro" },
     typeAliasTemplate: {
       className: "badge-typeAlias",
-      text: "type alias tmpl.",
+      text: "type alias template",
+      shortText: "type alias tmpl.",
     },
     functionTemplate: {
       className: "badge-function",
       text: "function template",
+      shortText: "function tmpl.",
     },
     variableTemplate: {
       className: "badge-variable",
       text: "variable template",
     },
+    concept: { className: "badge-concept", text: "concept" },
     deductionGuideTemplate: {
       className: "badge-deduction",
-      text: "deduction guide tmpl.",
+      text: "deduction guide template",
+      shortText: "deduction guide tmpl.",
     },
     functionFullSpecialization: {
       className: "badge-function",
-      text: "function spec.",
+      text: "function full specialization",
+      shortText: "function spec.",
     },
     variableFullSpecialization: {
       className: "badge-variable",
-      text: "variable spec.",
-    },
-    classFullSpecialization: {
-      className: "badge-class",
-      text: "class spec.",
-    },
-    classPartialSpecialization: {
-      className: "badge-class",
-      text: "class partial spec.",
+      text: "variable full specialization",
+      shortText: "variable spec.",
     },
     variablePartialSpecialization: {
       className: "badge-variable",
-      text: "variable partial spec.",
+      text: "variable partial specialization",
+      shortText: "variable partial spec.",
+    },
+    macro: { className: "badge-macro", text: "macro" },
+    functionLikeMacro: {
+      className: "badge-macro",
+      text: "function-like macro",
+      shortText: "func-like macro",
     },
   };
 
@@ -117,7 +143,7 @@ export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
     <>
       <div className="symbol-card-aux">
         {ns && <span className="symbol-card-namespace">{ns}</span>}
-        <span className={`badge ${badge.className}`}>{badge.text}</span>
+        <span className={`badge ${badge.className}`}>{badge.shortText || badge.text}</span>
         {!compact && (
           <span className="symbol-card-header">&lt;{fs.header}&gt;</span>
         )}

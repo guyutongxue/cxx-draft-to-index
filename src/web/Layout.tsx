@@ -22,7 +22,10 @@ export function Layout() {
     const rank = (s: SymbolEntry) => {
       let name = s.name.toLowerCase();
       let rank = 0;
-      if (name.startsWith("__")) {
+      if (!name) {
+        rank = Number.POSITIVE_INFINITY;
+      }
+      if (name.startsWith("__") && !name.endsWith("__")) {
         name = name.slice(2);
         rank += 10;
       }

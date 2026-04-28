@@ -16,13 +16,6 @@ const PATCHES: Record<string, [string, string][]> = {
       `             class T = projected_value_t<I, Proj>,`,
     ],
   ],
-  "support.tex": [
-    [`  \\indexlibraryglobal{align_val_t}%`, ""],
-    [`  \\indexlibraryglobal{destroying_delete_t}%`, ""],
-    [`  \\indexlibraryglobal{destroying_delete}%`, ""],
-    [`  \\indexlibraryglobal{nothrow_t}%`, ""],
-    [`  \\indexlibraryglobal{nothrow}`, ""],
-  ],
   "numerics.tex": [
     [
       `    constexpr resize_t<(basic_mask<Bytes, Abis>::size() + ...)>,`,
