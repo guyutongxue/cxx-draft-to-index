@@ -12,7 +12,6 @@ const server = Bun.serve({
     "/api/data": async () => {
       return Response.json(await indexData);
     },
-    "/styles.css": new Response(Bun.file("./src/web/styles.css")),
     "/*": indexHtml,
   },
 });

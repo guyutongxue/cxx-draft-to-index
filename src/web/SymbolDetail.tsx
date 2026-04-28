@@ -9,6 +9,7 @@ import type {
   ClassMemberEntry,
   NamespaceInfo,
   Parameter,
+  TemplateParameter,
 } from "../types";
 import { SymbolCard } from "./SymbolCard";
 import type { FlatSymbol } from "./App";
@@ -103,15 +104,18 @@ function getKindLabel(kind: SymbolKind, entry: SymbolEntry): string {
   return labels[kind] ?? kind;
 }
 
-function ParamTable({ params }: { params: (Parameter | string)[] }) {
+function ParamTable({
+  params,
+}: {
+  params: (Parameter | TemplateParameter | string)[];
+}) {
   return (
     <table className="data-table">
       <thead>
         <tr>
-          <th>Name</th>
           <th>Type</th>
+          <th>Name</th>
           <th>Default</th>
-          <th>Pack</th>
         </tr>
       </thead>
       <tbody>
@@ -124,10 +128,14 @@ function ParamTable({ params }: { params: (Parameter | string)[] }) {
             </tr>
           ) : (
             <tr key={i}>
+              <td>
+                {"templateParams" in p && p.templateParams
+                  ? `template <${p.templateParams.map((pp) => pp.raw).join(", ")}> ${p.kind === "ttConcept" ? "concept" : p.kind === "ttType" ? "class" : "auto"}`
+                  : p.type || "typename"}
+                {p.pack && "..."}
+              </td>
               <td className="name-col">{p.name ?? ""}</td>
-              <td>{p.type || p.raw}</td>
               <td className="dim">{p.defaultArg ?? ""}</td>
-              <td className="dim">{p.pack ? "yes" : ""}</td>
             </tr>
           ),
         )}
@@ -287,8 +295,8 @@ export function SymbolDetail({ selected, onSelect }: SymbolDetailProps) {
                 <span className="meta-value">trailing return type</span>
               </>
             )}
-            <span className="meta-label">Parameters</span>
-            <span className="meta-value">{symbol.parameters.length}</span>
+            {/* <span className="meta-label">Parameters</span>
+            <span className="meta-value">{symbol.parameters.length}</span> */}
           </div>
           {symbol.parameters.length > 0 && (
             <div style={{ marginTop: 8 }}>
