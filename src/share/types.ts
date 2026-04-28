@@ -9,6 +9,7 @@ export interface SymbolEntryBase {
   raw: string;
   name: string;
   languageLinkage: string | null;
+  access: "public" | "protected" | "private" | null;
 }
 
 export interface Parameter {
@@ -26,17 +27,26 @@ export interface TemplateParameter extends Parameter {
 
 export interface MacroSymbolEntry extends SymbolEntryBase {
   kind: "macro";
+  definition: string;
 }
 
 export interface FunctionLikeMacroSymbolEntry extends SymbolEntryBase {
   kind: "functionLikeMacro";
-  parameters: string[]; // raw parameter strings for now
+  definition: string;
+  parameters: string[];
+}
+
+export interface Base {
+  raw: string;
+  access: "public" | "protected" | "private";
+  virtual: boolean;
+  name: string;
 }
 
 export interface ClassSymbolEntry extends SymbolEntryBase {
   kind: "class";
   classKey: "class" | "struct";
-  base: string[];
+  base: Base[];
   members: ClassMemberEntry[] | null;
 }
 
@@ -69,14 +79,21 @@ export interface VariableSymbolEntry extends SymbolEntryBase {
   constexpr: boolean;
   inline: boolean;
   extern: boolean;
+  static: boolean;
+  initializer: string | null;
 }
 
 export interface FunctionSymbolEntry extends SymbolEntryBase {
   kind: "function";
   constexpr: boolean;
+  consteval: boolean;
+  inline: boolean;
+  extern: boolean;
+  static: boolean;
   operator: string | null; // e.g. +, [], ""ms (udl), int (conversion)
   explicit: boolean | string; // ctor and conversion
   friend: boolean;
+  virtual: boolean;
   returnType: string | null;
   isTrailingReturnType: boolean;
   parameters: Parameter[];
@@ -128,7 +145,7 @@ export interface Template {
   templateRequires?: string | null;
 }
 
-interface SpecializationInfo {
+interface Specialization {
   templateArgs: string[]; // raw template argument strings
 }
 
@@ -150,7 +167,7 @@ type FullSpecialize<T extends SymbolEntryBase> = Computed<
   }
     ? Omit<T, "kind"> & {
         kind: `${Kind}FullSpecialization`;
-      } & SpecializationInfo
+      } & Specialization
     : never
 >;
 type PartialSpecialize<T extends SymbolEntryBase> = Computed<
@@ -160,7 +177,7 @@ type PartialSpecialize<T extends SymbolEntryBase> = Computed<
     ? Omit<T, "kind"> & {
         kind: `${Kind}PartialSpecialization`;
       } & Template &
-        SpecializationInfo
+        Specialization
     : never
 >;
 
@@ -174,6 +191,7 @@ export interface DeductionGuideTemplateSymbolEntry extends Templatize<DeductionG
 
 export interface ConceptSymbolEntry extends Template, SymbolEntryBase {
   kind: "concept";
+  definition: string;
 }
 
 export interface FunctionFullSpecializationSymbolEntry extends FullSpecialize<FunctionSymbolEntry> {}

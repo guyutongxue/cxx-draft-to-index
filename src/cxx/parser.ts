@@ -1,4 +1,5 @@
 import type {
+  Base,
   ClassMemberEntry,
   EnumeratorEntry,
   ExtractKind,
@@ -156,9 +157,11 @@ type ClassSpecifierUseKind =
   | "reference"
   | "friendType";
 
+type AccessSpecifier = "public" | "protected" | "private";
+
 interface BaseSpecifierInfo {
   raw: string;
-  access: "public" | "protected" | "private" | null;
+  access: AccessSpecifier | null;
   virtual: boolean;
   typeId: IdExpressionInfo;
 }
@@ -506,6 +509,7 @@ export class Parser {
       startLoc,
       contextType: DeclarationContextType.TopLevel,
       scopeClassName: null,
+      access: null,
     });
   }
 
@@ -513,10 +517,12 @@ export class Parser {
     startLoc,
     contextType,
     scopeClassName,
+    access,
   }: {
     startLoc: Location;
     contextType: DeclarationContextType;
     scopeClassName: string | null;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     // template
     if (this.isId("template") && !this.nextTok().isP("[:")) {
@@ -530,23 +536,25 @@ export class Parser {
         startLoc,
         contextType,
         scopeClassName,
+        access,
       });
     }
 
     // [inline] namespace
     if (this.isId("namespace")) {
-      return this.parseNamespace({ inline: false });
+      return this.parseNamespace({ inline: false, access });
     }
     if (this.isId("inline")) {
       const nextTok = this.nextTok();
       if (nextTok.isId("namespace")) {
-        return this.parseNamespace({ inline: true });
+        return this.parseNamespace({ inline: true, access });
       }
     }
     if (this.isId("using")) {
       return this.parseUsingDirectiveOrDeclaration({
         startLoc,
         templateInfo: null,
+        access,
       });
     }
     if (this.isId("static_assert")) {
@@ -561,6 +569,7 @@ export class Parser {
       templateInfo: null,
       contextType,
       scopeClassName,
+      access,
     });
   }
 
@@ -607,11 +616,13 @@ export class Parser {
     contextType,
     scopeClassName,
     templateInfo,
+    access,
   }: {
     startLoc: Location;
     contextType: DeclarationContextType;
     scopeClassName: string | null;
     templateInfo: TemplateInfo | null;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     const symbols: SymbolEntry[] = [];
     const declSpecifier = this.parseDeclarationSpecifiers({
@@ -631,6 +642,15 @@ export class Parser {
       this.consumeP(";");
     }
     const { classSpecifier, enumSpecifier } = declSpecifier;
+    const base: Base[] =
+      classSpecifier?.baseSpecifiers.map((b) => ({
+        raw: b.raw,
+        access:
+          b.access ??
+          (classSpecifier.tagKind === "struct" ? "public" : "private"),
+        virtual: b.virtual,
+        name: b.typeId.name,
+      })) ?? [];
     if (
       classSpecifier?.id &&
       (classSpecifier.useKind === "declaration" ||
@@ -645,6 +665,7 @@ export class Parser {
               name: classSpecifier.id.name,
               raw: classSpecifier.raw + ";",
               members: classSpecifier.members,
+              access,
             }),
           );
         }
@@ -661,10 +682,11 @@ export class Parser {
               classSpecifier.id,
               {
                 classKey: classSpecifier.tagKind,
-                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                base,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
                 members: classSpecifier.members,
+                access,
               },
             ),
           );
@@ -676,10 +698,11 @@ export class Parser {
               classSpecifier.id,
               {
                 classKey: classSpecifier.tagKind,
-                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                base,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
                 members: classSpecifier.members,
+                access,
               },
             ),
           );
@@ -691,9 +714,10 @@ export class Parser {
               classSpecifier.id,
               {
                 classKey: classSpecifier.tagKind,
-                base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+                base,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 members: classSpecifier.members,
+                access,
               },
             ),
           );
@@ -702,9 +726,10 @@ export class Parser {
         symbols.push(
           this.buildNestedSymbol("class", templateInfo, classSpecifier.id, {
             classKey: classSpecifier.tagKind,
-            base: classSpecifier.baseSpecifiers.map((b) => b.raw),
+            base,
             raw: classSpecifier.raw + ";",
             members: classSpecifier.members,
+            access,
           }),
         );
       }
@@ -716,6 +741,7 @@ export class Parser {
           raw: this.lexer.range(startLoc, this.tok.loc),
           scoped: !!enumSpecifier.scoped,
           enumerators: enumSpecifier.enumerators,
+          access,
         }),
       );
     }
@@ -724,6 +750,11 @@ export class Parser {
     }
     for (const declarator of declaratorList.declarators) {
       const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
+      const static_ = declSpecifier.declSpecifiers.includes("static");
+      const inline = declSpecifier.declSpecifiers.includes("inline");
+      const extern =
+        declSpecifier.declSpecifiers.includes("extern") ||
+        (!inline && this.context.linkageStack.length > 0);
       this.assert(declarator.idExpr, `Declarator must have an id-expression`);
       const idLastPart = declarator.idExpr.parts.at(-1)!;
       const partialSpecialization = templateInfo && idLastPart.templateArgs;
@@ -761,11 +792,16 @@ export class Parser {
           pack: p.pack,
         }));
         const misc = {
+          access,
           operator,
           parameters,
           returnType: declarator.function.returnType,
           isTrailingReturnType: !!declarator.function.trailingReturnType,
           constexpr,
+          consteval: declSpecifier.declSpecifiers.includes("consteval"),
+          inline,
+          extern,
+          static: static_,
           explicit:
             typeof declSpecifier.explicitSpecifier === "boolean"
               ? declSpecifier.explicitSpecifier
@@ -774,6 +810,7 @@ export class Parser {
           variadic: declarator.function.variadic,
           ctor: declarator.function.ctor,
           dtor: declarator.function.dtor,
+          virtual: declSpecifier.declSpecifiers.includes("virtual"),
           cvRef: [
             declarator.function.qualifiers.const ? "const" : null,
             declarator.function.qualifiers.volatile ? "volatile" : null,
@@ -798,6 +835,7 @@ export class Parser {
                 targetType: declarator.function.trailingReturnType,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
+                access,
               }),
             );
           } else {
@@ -807,6 +845,7 @@ export class Parser {
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 parameters,
                 targetType: declarator.function.trailingReturnType,
+                access,
               }),
             );
           }
@@ -859,13 +898,17 @@ export class Parser {
         }
       } else {
         const type = declarator.typeInfo;
-        const constexpr = declSpecifier.declSpecifiers.includes("constexpr");
-        const inline = declSpecifier.declSpecifiers.includes("inline");
-        const extern =
-          declSpecifier.declSpecifiers.includes("extern") ||
-          (!inline && this.context.linkageStack.length > 0);
         const raw = this.lexer.range(startLoc, this.tok.loc);
-
+        const initializer = declarator.initializer?.raw ?? null;
+        const misc = {
+          access,
+          type,
+          constexpr,
+          extern,
+          inline,
+          static: static_,
+          initializer,
+        };
         if (templateInfo) {
           this.assert(
             declaratorList.declarators.length === 1,
@@ -880,11 +923,8 @@ export class Parser {
               this.buildSymbol("variableFullSpecialization", {
                 name: this.removeTemplateArgsFromId(declarator.idExpr).name,
                 templateArgs: idLastPart?.templateArgs.map((a) => a.raw),
-                type,
                 raw,
-                constexpr,
-                extern,
-                inline,
+                ...misc,
               }),
             );
           } else if (partialSpecialization) {
@@ -894,23 +934,17 @@ export class Parser {
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateArgs: partialSpecialization.map((a) => a.raw),
                 raw,
-                type,
-                constexpr,
-                extern,
-                inline,
+                ...misc,
               }),
             );
           } else {
             symbols.push(
               this.buildSymbol("variableTemplate", {
                 name: declarator.idExpr.name,
-                type,
-                raw,
-                constexpr,
-                extern,
-                inline,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
+                raw,
+                ...misc,
               }),
             );
           }
@@ -918,10 +952,7 @@ export class Parser {
           symbols.push(
             this.buildSymbol("variable", {
               name: declarator.idExpr.name,
-              type,
-              constexpr,
-              extern,
-              inline,
+              ...misc,
               raw: declSpecifier.raw + " " + declarator.raw + ";",
             }),
           );
@@ -1397,7 +1428,13 @@ export class Parser {
 
   // MARK: ---- Namespace ----
 
-  private parseNamespace({ inline }: { inline: boolean }): SymbolEntry[] {
+  private parseNamespace({
+    inline,
+    access,
+  }: {
+    inline: boolean;
+    access: AccessSpecifier | null;
+  }): SymbolEntry[] {
     const symbols: SymbolEntry[] = [];
     if (inline) {
       this.consumeId("inline");
@@ -1441,6 +1478,7 @@ export class Parser {
           name,
           targetNamespace: targetExpr.name,
           raw: this.lexer.range(startLoc, this.tok.loc),
+          access,
         }),
       );
       return symbols;
@@ -1476,25 +1514,29 @@ export class Parser {
   private parseUsingDirectiveOrDeclaration({
     templateInfo,
     startLoc,
+    access,
   }: {
     templateInfo: TemplateInfo | null;
     startLoc: Location;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     this.consumeId("using");
 
     // using namespace X;
     if (this.isId("namespace")) {
       this.assert(!templateInfo, `using-directive cannot be templated`);
-      return this.parseUsingDirective({ startLoc });
+      return this.parseUsingDirective({ startLoc, access });
     }
 
-    return this.parseUsingDeclaration({ templateInfo, startLoc });
+    return this.parseUsingDeclaration({ templateInfo, startLoc, access });
   }
 
   private parseUsingDirective({
     startLoc,
+    access,
   }: {
     startLoc: Location;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     this.consumeId("namespace");
     const idExpr = this.readIdExpression();
@@ -1504,14 +1546,17 @@ export class Parser {
         name: "", // using-directive does not introduce a name
         targetNamespace: idExpr.name,
         raw: this.lexer.range(startLoc, this.tok.loc),
+        access,
       }),
     ];
   }
 
   private parseUsingEnumDeclaration({
     startLoc,
+    access,
   }: {
     startLoc: Location;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     this.consumeId("enum");
     const idExpr = this.readIdExpression();
@@ -1522,6 +1567,7 @@ export class Parser {
         name: "",
         target: idExpr.name,
         raw,
+        access,
       }),
     ];
   }
@@ -1529,9 +1575,11 @@ export class Parser {
   private parseUsingDeclaration({
     templateInfo,
     startLoc,
+    access,
   }: {
     templateInfo: TemplateInfo | null;
     startLoc: Location;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     // using typename X::Y;
     if (this.isId("typename")) {
@@ -1540,7 +1588,7 @@ export class Parser {
 
     if (this.isId("enum")) {
       this.assert(!templateInfo, `using-enum cannot be templated`);
-      return this.parseUsingEnumDeclaration({ startLoc });
+      return this.parseUsingEnumDeclaration({ startLoc, access });
     }
 
     let idExpr = this.readIdExpression();
@@ -1562,6 +1610,7 @@ export class Parser {
             raw: this.lexer.range(startLoc, this.tok.loc),
             syntax: "using",
             templateParams: this.buildTemplateParams(templateInfo),
+            access,
           }),
         ];
       } else {
@@ -1570,6 +1619,7 @@ export class Parser {
             name,
             raw: this.lexer.range(startLoc, this.tok.loc),
             syntax: "using",
+            access,
           }),
         ];
       }
@@ -1584,6 +1634,7 @@ export class Parser {
           name: parts.at(-1)!.name,
           raw: this.lexer.range(startLoc, this.tok.loc) + ";",
           target: name,
+          access,
         }),
       );
       if (this.isP(";")) {
@@ -1723,10 +1774,12 @@ export class Parser {
     startLoc,
     contextType,
     scopeClassName,
+    access,
   }: {
     startLoc: Location;
     contextType: DeclarationContextType;
     scopeClassName: string | null;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     const templateHeadList: PlainTemplateInfo[] = [];
     do {
@@ -1769,6 +1822,7 @@ export class Parser {
       contextType,
       templateInfo,
       scopeClassName,
+      access,
     });
   }
 
@@ -1777,11 +1831,13 @@ export class Parser {
     contextType,
     templateInfo,
     scopeClassName,
+    access,
   }: {
     startLoc: Location;
     contextType: DeclarationContextType;
     templateInfo: TemplateInfo;
     scopeClassName: string | null;
+    access: AccessSpecifier | null;
   }): SymbolEntry[] {
     this.tryParseAttribute();
 
@@ -1790,6 +1846,7 @@ export class Parser {
       return this.parseUsingDirectiveOrDeclaration({
         startLoc,
         templateInfo,
+        access,
       });
     }
 
@@ -1798,6 +1855,7 @@ export class Parser {
       contextType,
       templateInfo,
       scopeClassName,
+      access,
     });
   }
 
@@ -1849,7 +1907,7 @@ export class Parser {
       this.consumeP(":");
       while (true) {
         const startLoc = this.tok.loc;
-        let accessSpecifier: "public" | "protected" | "private" | null = null;
+        let accessSpecifier: AccessSpecifier | null = null;
         let virtual = false;
         this.tryParseAttribute();
         // access-specifier or virtual
@@ -1901,8 +1959,11 @@ export class Parser {
     let members: ClassMemberEntry[] | null = null;
     if (mayDeclare && this.tok.isP("{")) {
       const componentName = idExpr?.parts.at(-1)?.value ?? null;
-      using _omitRecord = this.enterMemberScope();
-      members = this.parseMemberSpecification(componentName);
+      using memberScope = this.enterMemberScope();
+      members = this.parseMemberSpecification(
+        contextType === DeclarationContextType.Class ? "public" : "private",
+        componentName,
+      );
       useKind = "definition";
     }
     if (mayDeclare && this.tok.isP(";")) {
@@ -1926,6 +1987,7 @@ export class Parser {
    * Parse
    */
   private parseMemberSpecification(
+    initialAccess: AccessSpecifier,
     scopeClassName: string | null,
   ): ClassMemberEntry[] | null {
     this.consumeP("{");
@@ -1934,12 +1996,14 @@ export class Parser {
       return null;
     }
     const members: ClassMemberEntry[] = [];
+    let access = initialAccess;
     while (!this.isP("}")) {
       if (
         this.tok.type === TokenType.Identifier &&
         ["public", "protected", "private"].includes(this.tok.value) &&
         this.nextTok().isP(":")
       ) {
+        access = this.tok.value as AccessSpecifier;
         this.adv(); // access-specifier
         this.consumeP(":");
         continue;
@@ -1950,6 +2014,7 @@ export class Parser {
         startLoc,
         contextType: DeclarationContextType.Class,
         scopeClassName,
+        access,
       });
       for (const sym of symbols) {
         switch (sym.kind) {
@@ -2241,14 +2306,18 @@ export class Parser {
     this.tryParseAttribute();
 
     this.consumeP("=");
+    const definitionStartLoc = this.tok.loc;
     // LOOSE PARSE: we might not implement the parsing of logic-or-expression
     this.skipBalancedTokensUntilPunct([";"], false);
+    const definition = this.lexer.range(definitionStartLoc, this.tok.loc);
     this.consumeP(";");
     return [
       this.buildSymbol("concept", {
         name,
         raw: this.lexer.range(startLoc, this.tok.loc),
         templateParams: this.buildTemplateParams(templateInfo),
+        definition,
+        access: null,
       }),
     ];
   }
@@ -2928,7 +2997,7 @@ export class Parser {
     kind: Kind,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
-      Exclude<keyof SymbolEntryBase, "raw" | "name"> | "kind"
+      Exclude<keyof SymbolEntryBase, "raw" | "name" | "access"> | "kind"
     >,
   ): ExtractKind<SymbolEntry, Kind> {
     const result = R.omitBy(
@@ -2972,7 +3041,7 @@ export class Parser {
     id: IdExpressionInfo,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
-      Exclude<keyof SymbolEntryBase, "raw"> | "kind" | keyof Template
+      Exclude<keyof SymbolEntryBase, "raw" | "access"> | "kind" | keyof Template
     >,
   ): SymbolEntry {
     this.assert(

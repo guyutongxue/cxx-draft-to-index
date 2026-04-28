@@ -46,7 +46,7 @@ function hasEnumerators(s: SymbolEntry): s is EnumSymbolEntry {
   return s.kind === "enum";
 }
 
-function isFunction(s: SymbolEntry): s is FunctionSymbolEntry {
+export function isFunction(s: SymbolEntry): s is FunctionSymbolEntry {
   return (
     s.kind === "function" ||
     s.kind === "functionTemplate" ||
@@ -172,6 +172,9 @@ export function SymbolDetail({
             </span>
           ))}
           <span className={`badge ${badge.className}`}>{badge.text}</span>
+          {symbol.access && (
+            <span className="badge badge-access">{symbol.access}</span>
+          )}
           {symbol.languageLinkage && (
             <span className="badge badge-tag">
               extern "{symbol.languageLinkage}"
@@ -182,6 +185,9 @@ export function SymbolDetail({
           )}
           {showFunction && symbol.explicit && (
             <span className="badge badge-enum">explicit</span>
+          )}
+          {showFunction && symbol.virtual && (
+            <span className="badge badge-virtual">virtual</span>
           )}
           {showFunction && symbol.friend && (
             <span className="badge badge-friend">friend</span>
@@ -202,12 +208,6 @@ export function SymbolDetail({
           )}
           {showFunction && symbol.variadic && (
             <span className="badge badge-tag">variadic</span>
-          )}
-          {showFunction && symbol.ctor && (
-            <span className="badge badge-tag">constructor</span>
-          )}
-          {showFunction && symbol.dtor && (
-            <span className="badge badge-tag">destructor</span>
           )}
           {"syntax" in symbol && symbol.syntax === "typedef" && (
             <span className="badge badge-enum">typedef</span>
@@ -286,7 +286,7 @@ export function SymbolDetail({
             <div className="meta-grid">
               {symbol.base.map((b, i) => (
                 <div key={i} className="meta-value">
-                  {b}
+                  {b.raw}
                 </div>
               ))}
             </div>

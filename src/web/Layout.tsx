@@ -57,21 +57,23 @@ export function Layout() {
           {data?.headers.length ?? 0} headers, {allSymbols.length} symbols
         </span>
       </div>
-      <SearchBar />
       <div className="main-content">
         <div className="symbol-list-panel">
-          <SidebarContent
-            symbols={filteredSymbols}
-            query={query}
-            isEmpty={allSymbols.length === 0}
-            currentSymbolId={currentSymbolId}
-            onNavigate={(fs) => {
-              const target = `/symbols/${fs.key}`;
-              navigate(
-                query ? `${target}?q=${encodeURIComponent(query)}` : target,
-              );
-            }}
-          />
+          <SearchBar />
+          <div className="symbol-list">
+            <SidebarContent
+              symbols={filteredSymbols}
+              query={query}
+              isEmpty={allSymbols.length === 0}
+              currentSymbolId={currentSymbolId}
+              onNavigate={(fs) => {
+                const target = `/symbols/${fs.key}`;
+                navigate(
+                  query ? `${target}?q=${encodeURIComponent(query)}` : target,
+                );
+              }}
+            />
+          </div>
         </div>
         <Outlet />
       </div>

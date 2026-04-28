@@ -1,5 +1,6 @@
 import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../share/types";
 import type { FlatSymbol } from "./DataContext";
+import { isFunction } from "./SymbolDetail";
 import { SymbolName } from "./SymbolName";
 
 export interface SymbolCardProps {
@@ -19,7 +20,7 @@ interface BadgeInfo {
   shortText?: string;
 }
 
-export function getKindBadge( entry: SymbolEntry): BadgeInfo {
+export function getKindBadge(entry: SymbolEntry): BadgeInfo {
   const kind = entry.kind;
   if (kind === "class" && entry && "classKey" in entry) {
     return { className: `badge-${entry.classKey}`, text: entry.classKey };
@@ -48,7 +49,7 @@ export function getKindBadge( entry: SymbolEntry): BadgeInfo {
   if ("ctor" in entry && entry.ctor) {
     return { className: "badge-function", text: "constructor" };
   }
-   if ("dtor" in entry && entry.dtor) {
+  if ("dtor" in entry && entry.dtor) {
     return { className: "badge-function", text: "destructor" };
   }
 
@@ -149,7 +150,16 @@ export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
   return (
     <>
       <div className="symbol-card-aux">
-        {ns && <span className="symbol-card-namespace">{ns}</span>}
+        {isFunction(fs.symbol) && fs.symbol.virtual && (
+          <span className="badge badge-virtual">virtual</span>
+        )}
+        {isFunction(fs.symbol) && fs.symbol.friend && (
+          <span className="badge badge-friend">friend</span>
+        )}
+        {(fs.symbol.access === "private" ||
+          fs.symbol.access === "protected") && (
+          <span className={`badge badge-access`}>{fs.symbol.access}</span>
+        )}
         <span className={`badge ${badge.className}`}>
           {badge.shortText || badge.text}
         </span>
@@ -157,7 +167,12 @@ export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
           <span className="symbol-card-header">&lt;{fs.headers[0]}&gt;</span>
         )}
       </div>
-      <span className="symbol-card-name" onClick={onClick}>
+      <span
+        className="symbol-card-name"
+        onClick={onClick}
+        title={`${ns ? ns + "::" : ""}${fs.symbol.name}`}
+      >
+        {ns && <span className="symbol-card-namespace">{ns}::</span>}
         <SymbolName name={fs.symbol.name} />
       </span>
     </>
