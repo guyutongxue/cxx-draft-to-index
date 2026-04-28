@@ -31,6 +31,9 @@ function buildTopLevelMap(data: IndexOutput): Map<string, FlatSymbol> {
         const existing = map.get(key)!;
         if (!existing.headers.includes(hdr.header)) {
           existing.headers.push(hdr.header);
+          if (sym.raw.length >= existing.symbol.raw.length) {
+            existing.symbol = sym;
+          }
         } else {
           console.warn(
             `Duplicate symbol ID ${key} in header ${hdr.header}`,

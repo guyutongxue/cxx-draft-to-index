@@ -88,9 +88,13 @@ function ParamTable({
           ) : (
             <tr key={i}>
               <td>
-                {"templateParams" in p && p.templateParams
-                  ? `template <${p.templateParams.map((pp) => pp.raw).join(", ")}> ${p.kind === "ttConcept" ? "concept" : p.kind === "ttType" ? "class" : "auto"}`
-                  : p.type || "typename"}
+                <SymbolName
+                  name={
+                    "templateParams" in p && p.templateParams
+                      ? `template <${p.templateParams.map((pp) => pp.raw).join(", ")}> ${p.kind === "ttConcept" ? "concept" : p.kind === "ttType" ? "class" : "auto"}`
+                      : p.type || "typename"
+                  }
+                />
                 {p.pack && "..."}
               </td>
               <td className="name-col">{p.name ?? ""}</td>
@@ -163,7 +167,9 @@ export function SymbolDetail({
         {ns && <div className="symbol-detail-namespace">namespace {ns}</div>}
         <div className="symbol-detail-badges">
           {headers.map((header) => (
-            <span className="badge badge-tag" key={header}>&lt;{header}&gt;</span>
+            <span className="badge badge-tag" key={header}>
+              &lt;{header}&gt;
+            </span>
           ))}
           <span className={`badge ${badge.className}`}>{badge.text}</span>
           {symbol.languageLinkage && (
