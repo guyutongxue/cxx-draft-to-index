@@ -1524,7 +1524,7 @@ export class Parser {
         `Name introduced by using-alias-declaration should be identifier`,
       );
       this.consumeP("=");
-      this.skipBalancedTokensUntilPunct([";"], true);
+      this.skipBalancedTokensUntilPunct([";"], false);
       this.consumeP(";");
       if (templateInfo) {
         return [
@@ -2214,7 +2214,7 @@ export class Parser {
 
     this.consumeP("=");
     // LOOSE PARSE: we might not implement the parsing of logic-or-expression
-    this.skipBalancedTokensUntilPunct([";"], true);
+    this.skipBalancedTokensUntilPunct([";"], false);
     this.consumeP(";");
     return [
       this.buildSymbol("concept", {

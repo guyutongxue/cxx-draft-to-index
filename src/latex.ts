@@ -82,11 +82,6 @@ const PATCHES: Record<string, [string, string][]> = {
       `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>`,
       `      requires Const && @\\libconcept{convertible_to}@<sentinel_t<V>, sentinel_t<@\\exposidnc{Base}@>>;`,
     ],
-    // This is our problem
-    [
-      `    @\\exposconcept{tuple-like}@<T> && N < tuple_size_v<T> &&`,
-      `    @\\exposconcept{tuple-like}@<T> && (N < tuple_size_v<T>) &&`,
-    ],
   ],
   "exec.tex": [
     [
