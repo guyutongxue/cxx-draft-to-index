@@ -1,22 +1,20 @@
 import { Token, TokenType } from "./lexer";
 
 const LATEX_SIMPLE: Record<string, string> = {
-  "\\seebelow": "/*see_below*/",
-  "\\seebelownc": "/*see_below*/",
-  "\\seeabove": "/*see_above*/",
-  "\\unspec": "/*unspecified*/",
-  "\\unspecnc": "/*unspecified*/",
-  "\\unspecbool": "/*unspecified-bool-type*/",
-  "\\unspecalloctype": "/*unspecified-allocator-type*/",
-  "\\unspecuniqtype": "/*unspecified-unique-type*/",
-  "\\expos": "/*exposition-only*/",
-  "\\ellip": "...",
-  "\\brk": " ",
-  "\\nocorr": "",
+  "\\seebelow": "/* see_below */",
+  "\\seebelownc": "/* see_below */",
+  "\\seeabove": "/* see_above */",
+  "\\unspec": "/* unspecified */",
+  "\\unspecnc": "/* unspecified */",
+  "\\unspecbool": "/* unspecified-bool-type */",
+  "\\unspecalloctype": "/* unspecified-allocator-type */",
+  "\\unspecuniqtype": "/* unspecified-unique-type */",
+  "\\expos": "/* exposition-only */",
 };
 
 type Replacer = (match: string, ...groups: string[]) => string;
-const EXPOSITION_ONLY_REPLACER: Replacer = (match, name) => `__${name.replaceAll("-", "_")}`;
+const EXPOSITION_ONLY_REPLACER: Replacer = (match, name) =>
+  `__${name.replaceAll("-", "_")}`;
 
 const LATEX_BRACED: [RegExp, string | Replacer][] = [
   // as-is replacement with LaTeX labels
@@ -41,10 +39,6 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   // placeholders
   [/^\\placeholder\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
   [/^\\placeholdernc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-
-  // [/^\\tcode\{([^}]*)\}$/g, "$1"],
-  // [/^\\keyword\{([^}]+)\}$/g, "$1"],
-  // [/^\\term\{([^}]+)\}$/g, "$1"],
 ];
 
 function resolveSingleLaTeX(text: string): string {
@@ -55,7 +49,10 @@ function resolveSingleLaTeX(text: string): string {
     text = text.replace(regex, replacement as string);
   }
   // \textit command: replace with comment and drop its all inner LaTeX commands
-  if (text.startsWith("\\textit{") && text.endsWith("}")) {
+  if (
+    (text.startsWith("\\textit{") || text.startsWith("\\impdefx{")) &&
+    text.endsWith("}")
+  ) {
     text = `/* ${text.replace(/\\\w+\{|\}/g, "")} */`;
   }
   return text;

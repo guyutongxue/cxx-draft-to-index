@@ -1,4 +1,4 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useData } from "./DataContext";
 import { SymbolDetail } from "./SymbolDetail";
 import { computeMemberLocalId } from "./symbol_id";
@@ -28,6 +28,7 @@ export function SymbolDetailPage() {
   }>();
   const { topLevelMap } = useData();
   const navigate = useNavigate();
+  const [search] = useSearchParams();
 
   if (!symbolId) {
     return (
@@ -68,7 +69,7 @@ export function SymbolDetailPage() {
       .map((c) => `${c.id}`)
       .join("/");
     const prefix = memberSegments ? `${base}/${memberSegments}` : base;
-    navigate(`${prefix}/${localId}`);
+    navigate(`${prefix}/${localId}?${search}`);
   };
 
   const parentSymbol = chain.length > 1 ? chain[chain.length - 2].symbol : null;
@@ -86,10 +87,10 @@ export function SymbolDetailPage() {
                 .slice(0, -1)
                 .map((c) => c.id)
                 .join("/");
-              navigate(`/symbols/${idChain}`);
+              navigate(`/symbols/${idChain}?${search}`);
             }}
           >
-            ← Back to {parentSymbol.name}
+            &larr; Back to {parentSymbol.name}
           </button>
         </div>
       )}
@@ -118,6 +119,7 @@ function Breadcrumb({
 }: {
   chain: { symbol: SymbolEntry; id: string }[];
 }) {
+  const [search] = useSearchParams();
   return (
     <div className="breadcrumb">
       {/* <Link to="/" className="breadcrumb-link">
@@ -138,7 +140,7 @@ function Breadcrumb({
             {i === chain.length - 1 ? (
               <span className="breadcrumb-current">{c.symbol.name}</span>
             ) : (
-              <Link to={url} className="breadcrumb-link">
+              <Link to={`${url}?${search}`} className="breadcrumb-link">
                 {c.symbol.name}
               </Link>
             )}

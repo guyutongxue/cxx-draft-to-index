@@ -1,9 +1,26 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useSearchParams, useNavigate, useMatch } from "react-router-dom";
+import { useMemo } from "react";
 import { useData } from "./DataContext";
 import { SearchBar } from "./SearchBar";
+import { SymbolCard } from "./SymbolCard";
+import { computeSymbolId } from "./symbol_id";
 
 export function Layout() {
   const { data, allSymbols } = useData();
+  const [searchParams] = useSearchParams();
+  const query = searchParams.get("q") ?? "";
+  const navigate = useNavigate();
+  const detailMatch = useMatch("symbols/:symbolId/*");
+
+  const filteredSymbols = useMemo(() => {
+    if (!query.trim()) return allSymbols;
+    const q = query.toLowerCase();
+    return allSymbols.filter((fs) =>
+      fs.symbol.name.toLowerCase().includes(q),
+    );
+  }, [allSymbols, query]);
+
+  const currentSymbolId = detailMatch?.params.symbolId ?? null;
 
   return (
     <div className="app">
@@ -15,8 +32,68 @@ export function Layout() {
       </div>
       <SearchBar />
       <div className="main-content">
+        <div className="symbol-list-panel">
+          <SidebarContent
+            symbols={filteredSymbols}
+            query={query}
+            isEmpty={allSymbols.length === 0}
+            currentSymbolId={currentSymbolId}
+            onNavigate={(fs) => {
+              const target = `/symbols/${computeSymbolId(fs.symbol)}`;
+              navigate(query ? `${target}?q=${encodeURIComponent(query)}` : target);
+            }}
+          />
+        </div>
         <Outlet />
       </div>
     </div>
   );
+}
+
+function SidebarContent({
+  symbols,
+  query,
+  isEmpty,
+  currentSymbolId,
+  onNavigate,
+}: {
+  symbols: import("./DataContext").FlatSymbol[];
+  query: string;
+  isEmpty: boolean;
+  currentSymbolId: string | null;
+  onNavigate: (fs: import("./DataContext").FlatSymbol) => void;
+}) {
+  if (isEmpty) {
+    return <div className="symbol-list-empty">No symbols loaded.</div>;
+  }
+
+  if (!query.trim()) {
+    return (
+      <div className="symbol-list-empty">
+        Enter a search term to find symbols.
+      </div>
+    );
+  }
+
+  if (symbols.length === 0) {
+    return (
+      <div className="symbol-list-empty">
+        No symbols match <strong>&ldquo;{query}&rdquo;</strong>
+        <p>Try a different search term.</p>
+      </div>
+    );
+  }
+
+  return symbols.map((fs, i) => {
+    const id = computeSymbolId(fs.symbol);
+    const key = `${fs.header}:${fs.symbol.name}:${i}`;
+    return (
+      <SymbolCard
+        key={key}
+        fs={fs}
+        selected={currentSymbolId === id}
+        onClick={() => onNavigate(fs)}
+      />
+    );
+  });
 }
