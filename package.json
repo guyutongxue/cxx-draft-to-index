@@ -7,7 +7,8 @@
     "#std-index": "./dist/std-index.json"
   },
   "scripts": {
-    "build": "bun run src/main.ts",
+    "extract": "bun run src/main.ts",
+    "build": "bun run extract && bun build src/web/index.html --outdir=dist",
     "dev": "bun run src/server.ts --watch",
     "start": "bun run src/server.ts",
     "test": "bun test"
