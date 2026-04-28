@@ -15,6 +15,7 @@ import type { FlatSymbol } from "./App";
 
 interface SymbolDetailProps {
   selected: FlatSymbol | null;
+  onSelect: (fs: FlatSymbol) => void;
 }
 
 function namespacePath(ns: NamespaceInfo[]): string {
@@ -138,9 +139,13 @@ function ParamTable({ params }: { params: (Parameter | string)[] }) {
 function MembersSection({
   members,
   header,
+  selectedSymbol,
+  onSelect,
 }: {
   members: ClassMemberEntry[];
   header: string;
+  selectedSymbol: FlatSymbol | null;
+  onSelect: (fs: FlatSymbol) => void;
 }) {
   return (
     <div className="symbol-detail-section">
@@ -149,12 +154,16 @@ function MembersSection({
       </div>
       {members.map((m, i) => {
         const key = `${m.name}:${m.kind}:${i}`;
+        const isSelected =
+          selectedSymbol !== null &&
+          selectedSymbol.symbol.name === m.name &&
+          selectedSymbol.symbol.kind === m.kind;
         return (
           <SymbolCard
             key={key}
             fs={{ symbol: m, header }}
-            selected={false}
-            onClick={() => {}}
+            selected={isSelected}
+            onClick={() => onSelect({ symbol: m, header })}
             compact
           />
         );
@@ -163,7 +172,7 @@ function MembersSection({
   );
 }
 
-export function SymbolDetail({ selected }: SymbolDetailProps) {
+export function SymbolDetail({ selected, onSelect }: SymbolDetailProps) {
   if (!selected) {
     return (
       <div className="symbol-detail-empty">
@@ -382,7 +391,12 @@ export function SymbolDetail({ selected }: SymbolDetailProps) {
       </div>
 
       {showMembers && hasMembers(symbol) && symbol.members && (
-        <MembersSection members={symbol.members} header={headerName} />
+        <MembersSection
+          members={symbol.members}
+          header={headerName}
+          selectedSymbol={selected}
+          onSelect={onSelect}
+        />
       )}
     </div>
   );

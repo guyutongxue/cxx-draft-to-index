@@ -82,7 +82,7 @@ export function App() {
           isEmpty={allSymbols.length === 0}
           searchQuery={searchQuery}
         />
-        <SymbolDetail selected={selectedSymbol} />
+        <SymbolDetail selected={selectedSymbol} onSelect={setSelectedSymbol} />
       </div>
     </div>
   );
