@@ -1,11 +1,16 @@
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
   background: #0d1117;
   color: #c9d1d9;
   height: 100vh;
@@ -83,7 +88,9 @@ body {
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.1s, border-color 0.1s;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
 }
 
 .search-bar button:hover {
@@ -157,16 +164,20 @@ body {
   padding-left: 10px;
 }
 
-.symbol-card-name {
-  font-weight: 600;
-  color: #79c0ff;
+.symbol-card-name-wrapper {
+  color: #6e7681;
   font-family: monospace;
-  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex-shrink: 1;
   min-width: 0;
+}
+
+.symbol-card-name {
+  font-weight: 600;
+  color: #79c0ff;
+  font-size: 13px;
 }
 
 .exposition-only {
@@ -192,8 +203,11 @@ body {
   font-size: 10px;
   color: #6e7681;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+.symbol-card-params {
+  font-size: 11px;
+  color: #6e7681;
+  white-space: nowrap;
 }
 
 .badge {
@@ -206,24 +220,78 @@ body {
   white-space: nowrap;
 }
 
-.badge-access         { background: #816e8133; color: #9e8b9d; }
-.badge-class          { background: #1f6feb33; color: #58a6ff; }
-.badge-struct         { background: #1f6feb33; color: #58a6ff; }
-.badge-union          { background: #8957e533; color: #bc8cff; }
-.badge-enum           { background: #da363333; color: #f0883e; }
-.badge-function       { background: #23863633; color: #3fb950; }
-.badge-variable       { background: #9e6a0333; color: #d29922; }
-.badge-typeAlias      { background: #bf4b8a33; color: #db61a2; }
-.badge-concept        { background: #1f6feb33; color: #58a6ff; }
-.badge-macro          { background: #6e768133; color: #8b949e; }
-.badge-template       { background: #8957e533; color: #bc8cff; }
-.badge-specialization { background: #da363333; color: #f0883e; }
-.badge-using          { background: #6e768133; color: #8b949e; }
-.badge-namespace      { background: #6e768133; color: #8b949e; }
-.badge-deduction      { background: #bf4b8a33; color: #db61a2; }
-.badge-friend         { background: #6e768133; color: #8b949e; }
-.badge-virtual        { background: #da413333; color: #f0703e; }
-.badge-default        { background:   #21262d; color: #8b949e; }
+.badge-access {
+  background: #816e8133;
+  color: #9e8b9d;
+}
+.badge-class {
+  background: #1f6feb33;
+  color: #58a6ff;
+}
+.badge-struct {
+  background: #1f6feb33;
+  color: #58a6ff;
+}
+.badge-union {
+  background: #8957e533;
+  color: #bc8cff;
+}
+.badge-enum {
+  background: #da363333;
+  color: #f0883e;
+}
+.badge-function {
+  background: #9e6a0333;
+  color: #d29922;
+}
+.badge-variable {
+  background: #23863633;
+  color: #3fb950;
+}
+.badge-typeAlias {
+  background: #bf4b8a33;
+  color: #db61a2;
+}
+.badge-concept {
+  background: #1f6feb33;
+  color: #58a6ff;
+}
+.badge-macro {
+  background: #6e768133;
+  color: #8b949e;
+}
+.badge-template {
+  background: #8957e533;
+  color: #bc8cff;
+}
+.badge-specialization {
+  background: #da363333;
+  color: #f0883e;
+}
+.badge-using {
+  background: #6e768133;
+  color: #8b949e;
+}
+.badge-namespace {
+  background: #6e768133;
+  color: #8b949e;
+}
+.badge-deduction {
+  background: #252e33;
+  color: #9d99c1;
+}
+.badge-friend {
+  background: #46a66933;
+  color: #208d70;
+}
+.badge-virtual {
+  background: #da413333;
+  color: #f0703e;
+}
+.badge-default {
+  background: #21262d;
+  color: #8b949e;
+}
 
 .badge-tag {
   background: #1c2333;
@@ -235,7 +303,7 @@ body {
 .symbol-detail-panel {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
+  padding: 12px 24px;
 }
 
 .symbol-detail-empty {
@@ -252,17 +320,18 @@ body {
   margin-bottom: 20px;
 }
 
+.symbol-detail-prefix {
+  font-size: 12px;
+  color: #8b949e;
+  font-family: monospace;
+  white-space: pre;
+}
+
 .symbol-detail-name {
+  margin-top: 2px;
   font-size: 18px;
   font-weight: 700;
   color: #79c0ff;
-  font-family: monospace;
-}
-
-.symbol-detail-namespace {
-  font-size: 12px;
-  color: #8b949e;
-  margin-top: 2px;
   font-family: monospace;
 }
 
@@ -376,11 +445,13 @@ body {
 .member-list {
   display: grid;
   grid-template-columns: min-content 1fr;
-  gap: 8px;
 }
 
-.member-list .symbol-card-name {
-  cursor: pointer;
+.member-list .symbol-card {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+
 }
 
 .loading {
@@ -403,7 +474,9 @@ body {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .error-view {

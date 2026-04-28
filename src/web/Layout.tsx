@@ -67,7 +67,7 @@ export function Layout() {
               isEmpty={allSymbols.length === 0}
               currentSymbolId={currentSymbolId}
               onNavigate={(fs) => {
-                const target = `/symbols/${fs.key}`;
+                const target = `/symbols/${encodeURIComponent(fs.key)}`;
                 navigate(
                   query ? `${target}?q=${encodeURIComponent(query)}` : target,
                 );

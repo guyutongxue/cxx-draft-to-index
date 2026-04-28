@@ -11,13 +11,14 @@ import type {
   Parameter,
   TemplateParameter,
 } from "../share/types";
-import { getKindBadge, namespacePath, SymbolCardContent } from "./SymbolCard";
+import { getKindBadge, SymbolCard } from "./SymbolCard";
 import { SymbolName } from "./SymbolName";
 import { computeMemberLocalId } from "../share/symbol_id";
-import { FlatSymbol } from "./DataContext";
+import { type FlatSymbol, namespacePath } from "./DataContext";
 
 interface SymbolDetailProps extends FlatSymbol {
   onMemberClick?: (symbolId: string) => void;
+  prefix?: string;
 }
 
 function isTemplate(kind: SymbolKind): boolean {
@@ -72,16 +73,16 @@ function ParamTable({
     <table className="data-table">
       <thead>
         <tr>
-          <th>Type</th>
+          {typeof params[0] !== "string" && <th>Type</th>}
           <th>Name</th>
-          <th>Default</th>
+          {typeof params[0] !== "string" && <th>Default</th>}
         </tr>
       </thead>
       <tbody>
         {params.map((p, i) =>
           typeof p === "string" ? (
             <tr key={i}>
-              <td colSpan={3} className="dim">
+              <td className="dim">
                 {p}
               </td>
             </tr>
@@ -127,7 +128,7 @@ function MembersSection({
         {members.map((m, i) => {
           const symbolId = computeMemberLocalId(m);
           return (
-            <SymbolCardContent
+            <SymbolCard
               key={symbolId}
               fs={{ symbol: m, key: symbolId, headers }}
               selected={selectedMemberId === symbolId}
@@ -144,6 +145,7 @@ function MembersSection({
 export function SymbolDetail({
   symbol,
   headers,
+  prefix,
   onMemberClick,
 }: SymbolDetailProps) {
   const ns = namespacePath(symbol.namespace);
@@ -162,9 +164,9 @@ export function SymbolDetail({
     <div className="symbol-detail-panel">
       <div className="symbol-detail-header">
         <div className="symbol-detail-name">
+          {prefix && <div className="symbol-detail-prefix">{prefix}</div>}
           <SymbolName name={symbol.name} />
         </div>
-        {ns && <div className="symbol-detail-namespace">namespace {ns}</div>}
         <div className="symbol-detail-badges">
           {headers.map((header) => (
             <span className="badge badge-tag" key={header}>

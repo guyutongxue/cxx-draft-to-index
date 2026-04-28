@@ -29,8 +29,8 @@ function computeIdImpl(symbol: SymbolEntry, namespace: string | null): string {
   if ("templateArgs" in symbol) {
     id += `<${symbol.templateArgs.join(",")}>`;
   }
-  if ("parameters" in symbol) {
-    id += `(${paramsKey(symbol.parameters)})`;
+  if ("parameters" in symbol && "variadic" in symbol) {
+    id += `(${paramsKey(symbol.parameters)}${symbol.variadic ? "..." : ""})`;
   }
   if ("cvRef" in symbol) {
     id += symbol.cvRef.replace(/\s+/g, "");

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import type { IndexOutput, SymbolEntry } from "../share/types";
+import type { IndexOutput, NamespaceInfo, SymbolEntry } from "../share/types";
 import { computeSymbolId } from "../share/symbol_id";
 
 const API_URL = "/std-index.json";
@@ -21,6 +21,15 @@ const DataContext = createContext<DataContextValue>({
   allSymbols: [],
   topLevelMap: new Map(),
 });
+const overloadSetSize = new Map<string, number>();
+
+export function namespacePath(ns: NamespaceInfo[]): string {
+  return ns.map((n) => n.name ?? "⟨anonymous⟩").join("::");
+}
+
+const getScopedName = (sym: SymbolEntry): string => {
+  return `${namespacePath(sym.namespace)}::${sym.name}`;
+};
 
 function buildTopLevelMap(data: IndexOutput): Map<string, FlatSymbol> {
   const map = new Map<string, FlatSymbol>();
@@ -43,10 +52,20 @@ function buildTopLevelMap(data: IndexOutput): Map<string, FlatSymbol> {
         }
       } else {
         map.set(key, { symbol: sym, headers: [hdr.header], key });
+        const scopedName = getScopedName(sym);
+        overloadSetSize.set(
+          scopedName,
+          (overloadSetSize.get(scopedName) ?? 0) + 1,
+        );
       }
     }
   }
   return map;
+}
+
+export function hasOverloads(symbol: SymbolEntry): boolean {
+  const scopedName = getScopedName(symbol);
+  return (overloadSetSize.get(scopedName) ?? 0) > 1;
 }
 
 export function DataProvider({ children }: { children: React.ReactNode }) {

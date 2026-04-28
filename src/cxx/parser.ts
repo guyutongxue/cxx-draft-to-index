@@ -1297,7 +1297,9 @@ export class Parser {
       surrounding[0]?.kind === "function"
         ? {
             ...surrounding[0],
-            returnType: this.buildTypeInfo(declSpecifier, surrounding.slice(1)),
+            returnType:
+              surrounding[0].trailingReturnType ??
+              this.buildTypeInfo(declSpecifier, surrounding.slice(1)),
             ctor:
               declSpecifier.typeString === "" &&
               idExprKind === IdPartKind.Identifier,

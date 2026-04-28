@@ -1,5 +1,5 @@
 import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../share/types";
-import type { FlatSymbol } from "./DataContext";
+import { hasOverloads, namespacePath, type FlatSymbol } from "./DataContext";
 import { isFunction } from "./SymbolDetail";
 import { SymbolName } from "./SymbolName";
 
@@ -8,10 +8,6 @@ export interface SymbolCardProps {
   selected: boolean;
   onClick?: () => void;
   compact?: boolean;
-}
-
-export function namespacePath(ns: NamespaceInfo[]): string {
-  return ns.map((n) => n.name ?? "⟨anonymous⟩").join("::");
 }
 
 interface BadgeInfo {
@@ -98,6 +94,7 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
     variableTemplate: {
       className: "badge-variable",
       text: "variable template",
+      shortText: "variable tmpl.",
     },
     concept: { className: "badge-concept", text: "concept" },
     deductionGuideTemplate: {
@@ -131,24 +128,30 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
   return map[kind] ?? { className: "badge-default", text: kind };
 }
 
-export function SymbolCard(props: SymbolCardProps) {
-  return (
-    <div
-      className={`symbol-card${props.selected ? " selected" : ""}${props.compact ? " compact" : ""}`}
-      onClick={props.onClick}
-    >
-      {" "}
-      <SymbolCardContent {...props} onClick={void 0} />
-    </div>
-  );
-}
-
-export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
+export function SymbolCard({
+  fs,
+  selected,
+  compact,
+  onClick,
+}: SymbolCardProps) {
   const ns = namespacePath(fs.symbol.namespace);
   const badge = getKindBadge(fs.symbol);
 
+  let paramInfo: string | null = null;
+  if (isFunction(fs.symbol) && (!ns || hasOverloads(fs.symbol))) {
+    paramInfo = `(${fs.symbol.parameters.map((p) => `${p.type}${p.pack ? "..." : ""}`).join(", ")}${
+      fs.symbol.variadic ? "..." : ""
+    }) ${fs.symbol.cvRef}`;
+  }
+  if ("templateArgs" in fs.symbol && fs.symbol.templateArgs) {
+    paramInfo = `<${fs.symbol.templateArgs.join(", ")}>`;
+  }
+
   return (
-    <>
+    <div
+      className={`symbol-card${selected ? " selected" : ""}${compact ? " compact" : ""}`}
+      onClick={onClick}
+    >
       <div className="symbol-card-aux">
         {isFunction(fs.symbol) && fs.symbol.virtual && (
           <span className="badge badge-virtual">virtual</span>
@@ -168,13 +171,16 @@ export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
         )}
       </div>
       <span
-        className="symbol-card-name"
+        className="symbol-card-name-wrapper"
         onClick={onClick}
         title={`${ns ? ns + "::" : ""}${fs.symbol.name}`}
       >
         {ns && <span className="symbol-card-namespace">{ns}::</span>}
-        <SymbolName name={fs.symbol.name} />
+        <span className="symbol-card-name">
+          <SymbolName name={fs.symbol.name} />
+        </span>
+        {paramInfo && <span className="symbol-card-params">{paramInfo}</span>}
       </span>
-    </>
+    </div>
   );
 }

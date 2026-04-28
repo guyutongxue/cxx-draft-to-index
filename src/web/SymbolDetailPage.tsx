@@ -4,7 +4,7 @@ import {
   Link,
   useSearchParams,
 } from "react-router-dom";
-import { useData } from "./DataContext";
+import { namespacePath, useData } from "./DataContext";
 import { SymbolDetail } from "./SymbolDetail";
 import { computeMemberLocalId } from "../share/symbol_id";
 import type {
@@ -73,12 +73,35 @@ export function SymbolDetailPage() {
 
   const handleMemberClick = (memberId: string) => {
     navigate(
-      `/symbols/${symbolId}/${splat ? `${splat}/` : ""}${memberId}?${search}`,
+      `/symbols/${encodeURIComponent(symbolId)}/${splat ? `${splat}/` : ""}${encodeURIComponent(memberId)}?${search}`,
     );
   };
 
   const parentSymbol = chain.length > 1 ? chain[chain.length - 2].symbol : null;
   const parentId = chain.length > 1 ? chain[chain.length - 2].id : null;
+
+  let namespace = namespacePath(chain[0].symbol.namespace);
+  let prefix = namespace ? namespace + "::" : "";
+  let templateHeads: string[] = [];
+  for (let i = 0; i < chain.length; i++) {
+    const s = chain[i].symbol;
+    if ("templateParams" in s) {
+      templateHeads.push(s.templateParams.map((tp) => tp.raw).join(","));
+    }
+    if (i < chain.length - 1) {
+      prefix += s.name;
+      if ("templateArgs" in s) {
+        prefix += `<${s.templateArgs.join(", ")}>`;
+      } else if ("templateParams" in s) {
+        prefix += `<${s.templateParams.map((tp) => tp.name || "_").join(", ")}>`;
+      }
+      prefix += "::";
+    }
+  }
+  prefix =
+    templateHeads
+      .map((th, i) => `${" ".repeat(i * 2)}template <${th}>\n`)
+      .join("") + prefix;
 
   return (
     <div className="detail-page">
@@ -90,7 +113,7 @@ export function SymbolDetailPage() {
             onClick={() => {
               const idChain = chain
                 .slice(0, -1)
-                .map((c) => c.id)
+                .map((c) => encodeURIComponent(c.id))
                 .join("/");
               navigate(`/symbols/${idChain}?${search}`);
             }}
@@ -103,6 +126,7 @@ export function SymbolDetailPage() {
         symbol={tail.symbol}
         headers={entry.headers}
         key={tail.id}
+        prefix={prefix}
         onMemberClick={handleMemberClick}
       />
     </div>
