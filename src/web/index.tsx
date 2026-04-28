@@ -13,7 +13,7 @@ root.render(
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<SearchPage />} />
-          <Route path=":header/:symbolId/*" element={<SymbolDetailPage />} />
+          <Route path="symbols/:symbolId/*" element={<SymbolDetailPage />} />
         </Route>
       </Routes>
     </DataProvider>

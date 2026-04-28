@@ -57,7 +57,7 @@ export function SearchPage() {
             key={key}
             fs={fs}
             selected={false}
-            onClick={() => navigate(`/${fs.header}/${symbolId}`)}
+            onClick={() => navigate(`/symbols/${symbolId}`)}
           />
         );
       })}

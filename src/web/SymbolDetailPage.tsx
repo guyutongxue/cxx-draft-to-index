@@ -22,19 +22,14 @@ interface ChainEntry {
 }
 
 export function SymbolDetailPage() {
-  const {
-    header,
-    symbolId,
-    "*": splat,
-  } = useParams<{
-    header: string;
+  const { symbolId, "*": splat } = useParams<{
     symbolId: string;
     "*"?: string;
   }>();
   const { topLevelMap } = useData();
   const navigate = useNavigate();
 
-  if (!header || !symbolId) {
+  if (!symbolId) {
     return (
       <div className="symbol-detail-empty">
         Invalid URL — missing header or symbol ID.
@@ -43,11 +38,9 @@ export function SymbolDetailPage() {
   }
 
   const entry = topLevelMap.get(symbolId);
-  if (!entry || entry.header !== header) {
+  if (!entry) {
     return (
-      <div className="symbol-detail-empty">
-        Symbol not found: {header}/{symbolId}
-      </div>
+      <div className="symbol-detail-empty">Symbol not found: {symbolId}</div>
     );
   }
 
@@ -69,7 +62,7 @@ export function SymbolDetailPage() {
 
   const handleMemberClick = (memberSymbol: SymbolEntry) => {
     const localId = computeMemberLocalId(memberSymbol);
-    const base = `/${header}/${symbolId}`;
+    const base = `/symbols/${symbolId}`;
     const memberSegments = chain
       .slice(1)
       .map((c) => `${c.id}`)
@@ -83,21 +76,17 @@ export function SymbolDetailPage() {
 
   return (
     <div className="detail-page">
-      <Breadcrumb chain={chain} header={header} />
+      <Breadcrumb chain={chain} />
       {parentSymbol && parentId && (
         <div className="symbol-detail-section">
           <button
             className="back-btn"
             onClick={() => {
-              const historySegments = chain
-                .slice(1, -1)
-                .map((c) => `${c.id}`)
+              const idChain = chain
+                .slice(0, -1)
+                .map((c) => c.id)
                 .join("/");
-              const target =
-                historySegments.length > 0
-                  ? `/${header}/${symbolId}/${historySegments}`
-                  : `/${header}/${symbolId}`;
-              navigate(target);
+              navigate(`/symbols/${idChain}`);
             }}
           >
             ← Back to {parentSymbol.name}
@@ -126,16 +115,14 @@ function findMemberByLocalId(
 
 function Breadcrumb({
   chain,
-  header,
 }: {
   chain: { symbol: SymbolEntry; id: string }[];
-  header: string;
 }) {
   return (
     <div className="breadcrumb">
-      <Link to="/" className="breadcrumb-link">
+      {/* <Link to="/" className="breadcrumb-link">
         &lt;{header}&gt;
-      </Link>
+      </Link> */}
       {chain.map((c, i) => {
         const segments = chain
           .slice(1, i + 1)
@@ -143,8 +130,8 @@ function Breadcrumb({
           .join("/");
         const url =
           segments.length > 0
-            ? `/${header}/${chain[0].id}/${segments}`
-            : `/${header}/${chain[0].id}`;
+            ? `/symbols/${chain[0].id}/${segments}`
+            : `/symbols/${chain[0].id}`;
         return (
           <span key={i}>
             <span className="breadcrumb-sep">{">"}</span>
