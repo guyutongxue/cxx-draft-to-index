@@ -1,4 +1,9 @@
-import type { ClassMemberEntry, EnumSymbolEntry, SymbolEntry } from "./types";
+import type {
+  ClassMemberEntry,
+  EnumSymbolEntry,
+  SymbolEntry,
+  TemplateParameter,
+} from "./types";
 
 type MergeEligibleSymbol = Extract<
   SymbolEntry,
@@ -84,6 +89,12 @@ function mergeSingleSymbol<T extends MergeEligibleSymbol>(
   return exists;
 }
 
+function templateParamKey(param: TemplateParameter): string {
+  return `(${param.kind}${
+    param.templateParams?.map(templateParamKey).join(",") ?? ""
+  })${param.type}${param.pack ? "..." : ""}`;
+}
+
 function mergeKey(symbol: SymbolEntry, parentScope: string[]): string | null {
   if (!isMergeTarget(symbol)) {
     return null;
@@ -97,9 +108,7 @@ function mergeKey(symbol: SymbolEntry, parentScope: string[]): string | null {
     symbol.kind === "classTemplate" ||
     symbol.kind === "classPartialSpecialization"
   ) {
-    keyParts.push(
-      symbol.templateParams.map((p) => p.name ?? "(anon)").join(","),
-    );
+    keyParts.push(...symbol.templateParams.map(templateParamKey).join(","));
   }
   if (
     symbol.kind === "classPartialSpecialization" ||

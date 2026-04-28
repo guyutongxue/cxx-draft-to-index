@@ -25,12 +25,13 @@ interface AttributeInfo {
 }
 
 interface TemplateParameterInfo {
-  kind: "constant" | "type" | "template";
+  kind: "constant" | "type" | "ttConstant" | "ttConcept" | "ttType";
   name: string | null;
   pack: boolean;
   defaultArg: string | null;
   raw: string;
   typeInfo: string | null;
+  ttParams: TemplateParameterInfo[] | null;
 }
 
 interface ParameterInfo {
@@ -241,7 +242,7 @@ interface ParameterListInfo {
   variadic: boolean;
 }
 
-interface FunctionInfo extends ParameterListInfo {
+interface FunctionSurrounding extends ParameterListInfo {
   kind: "function";
   qualifiers: FunctionQualifierInfo;
   trailingReturnType: string | null;
@@ -250,8 +251,14 @@ interface FunctionInfo extends ParameterListInfo {
   contracts: { raw: string }[];
 }
 
+interface FunctionInfo extends FunctionSurrounding {
+  returnType: string | null;
+  constructor: boolean;
+  destructor: boolean;
+}
+
 type DeclaratorSurrounding =
-  | FunctionInfo
+  | FunctionSurrounding
   | {
       kind: "array";
       size: string; // raw
@@ -752,8 +759,7 @@ export class Parser {
           defaultArg: p.defaultArg?.raw ?? null,
           pack: p.pack,
         }));
-        const returnType =
-          declarator.function.trailingReturnType ?? declSpecifier.typeString;
+        const returnType = declarator.function.returnType;
         const isTrailingReturnType = !!declarator.function.trailingReturnType;
         const explicit =
           typeof declSpecifier.explicitSpecifier === "boolean"
@@ -1183,19 +1189,10 @@ export class Parser {
     return { declarators, kind, specialFunctionBody };
   }
 
-  private parseDeclarator({
-    declSpecifier,
-    contextType,
-  }: {
-    declSpecifier: DeclarationSpecifierInfo;
-    contextType: DeclaratorContextType;
-  }): DeclaratorInfo {
-    const startLoc = this.tok.loc;
-    const { pack, idExpr, surrounding } = this.parseDeclaratorImpl({
-      contextType,
-      depth: 0,
-    });
-    const endLoc = this.tok.loc;
+  private buildTypeInfo(
+    declSpecifier: DeclarationSpecifierInfo,
+    surrounding: DeclaratorSurrounding[],
+  ): string {
     let typeInfo = "";
     let direction: "postfix" | "prefix" | null = null;
     for (const s of surrounding) {
@@ -1251,15 +1248,41 @@ export class Parser {
       return punct + " ";
     });
     const leading = declSpecifier.typeString;
-    const functionInfo =
-      surrounding[0]?.kind === "function" ? surrounding[0] : null;
+    return `${leading}${join}${typeInfo}`.trim();
+  }
+
+  private parseDeclarator({
+    declSpecifier,
+    contextType,
+  }: {
+    declSpecifier: DeclarationSpecifierInfo;
+    contextType: DeclaratorContextType;
+  }): DeclaratorInfo {
+    const startLoc = this.tok.loc;
+    const { pack, idExpr, surrounding } = this.parseDeclaratorImpl({
+      contextType,
+      depth: 0,
+    });
+    const endLoc = this.tok.loc;
+    const typeInfo = this.buildTypeInfo(declSpecifier, surrounding);
+    const idExprKind = idExpr?.parts.at(-1)?.kind;
+    const functionInfo: FunctionInfo | null =
+      surrounding[0]?.kind === "function"
+        ? {
+            ...surrounding[0],
+            returnType: this.buildTypeInfo(declSpecifier, surrounding.slice(1)),
+            constructor:
+              declSpecifier.typeString === "" &&
+              idExprKind === IdPartKind.Identifier,
+            destructor: idExprKind === IdPartKind.Destructor,
+          }
+        : null;
     if (declSpecifier.typeString === "") {
       this.assert(
         functionInfo,
         `Declaration without type-specifier must be function (ctor, dtor or conversion)`,
       );
     }
-    typeInfo = `${leading}${join}${typeInfo}`.trim();
     return {
       pack,
       idExpr,
@@ -1584,6 +1607,7 @@ export class Parser {
     let pack = false;
     let defaultArg: string | null = null;
     let typeInfo: string | null = null;
+    let ttParams: TemplateParameterInfo[] | null = null;
     const readNameAndDefaultArg = () => {
       if (this.isP("...")) {
         pack = true;
@@ -1603,16 +1627,20 @@ export class Parser {
     };
     do {
       if (this.isId("template")) {
-        kind = "template";
         this.consumeId("template");
-        this.parseTemplateParameterList();
-        this.assert(
-          this.isId("class") ||
-            this.isId("typename") ||
-            this.isId("concept") ||
-            this.isId("auto"),
-          "should be one of `class`, `typename`, `concept`, or `auto` after template-head in tt-parameter",
-        );
+        ttParams = this.parseTemplateParameterList();
+        if (this.isId("class") || this.isId("typename")) {
+          kind = "ttType";
+        } else if (this.isId("concept")) {
+          kind = "ttConcept";
+        } else if (this.isId("auto")) {
+          kind = "ttConstant";
+        } else {
+          this.assert(
+            false,
+            "should be one of `class`, `typename`, `concept`, or `auto` after template-head in tt-parameter",
+          );
+        }
         this.adv();
         readNameAndDefaultArg();
       } else if (this.isId("class") || this.isId("typename")) {
@@ -1651,6 +1679,7 @@ export class Parser {
       defaultArg,
       raw: this.lexer.range(startLoc, endLoc),
       typeInfo,
+      ttParams,
     };
   }
 
@@ -1993,7 +2022,7 @@ export class Parser {
     };
   }
 
-  private parseParameterAndQualifiers(): FunctionInfo {
+  private parseParameterAndQualifiers(): FunctionSurrounding {
     this.consumeP("(");
     const parameterListInfo: ParameterListInfo = {
       parameters: [],
@@ -2879,7 +2908,9 @@ export class Parser {
     };
   }
 
-  private buildTemplateParams(params: TemplateInfo): TemplateParameter[] {
+  private buildTemplateParams(
+    params: Pick<TemplateInfo, "templateParameters">,
+  ): TemplateParameter[] {
     return params.templateParameters.map((p) => ({
       raw: p.raw,
       kind: p.kind,
@@ -2887,6 +2918,9 @@ export class Parser {
       defaultArg: p.defaultArg,
       pack: p.pack,
       type: p.typeInfo ?? "",
+      templateParams: p.ttParams
+        ? this.buildTemplateParams({ templateParameters: p.ttParams })
+        : null,
     }));
   }
   private buildSymbol<Kind extends SymbolKind>(

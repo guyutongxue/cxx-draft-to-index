@@ -20,7 +20,8 @@ export interface Parameter {
 }
 
 export interface TemplateParameter extends Parameter {
-  kind: "type" | "constant" | "template";
+  kind: "type" | "constant" | "ttConstant" | "ttConcept" | "ttType";
+  templateParams: TemplateParameter[] | null; // for template template parameters
 }
 
 export interface MacroSymbolEntry extends SymbolEntryBase {
@@ -76,7 +77,7 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
   operator: string | null; // e.g. +, [], ""ms (udl), int (conversion)
   explicit: boolean | string; // ctor and conversion
   friend: boolean;
-  returnType: string; // "" for ctor and conversion
+  returnType: string | null;
   isTrailingReturnType: boolean;
   parameters: Parameter[];
   variadic: boolean;
