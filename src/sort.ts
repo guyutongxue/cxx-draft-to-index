@@ -1,24 +1,16 @@
 import { DepGraph } from "dependency-graph";
-import type { PreprocessedCodeblock } from "./types";
+import { PreprocessedHeader } from "./types";
 
 export function topologicalSort(
-  codeblocks: PreprocessedCodeblock[],
-): PreprocessedCodeblock[] {
-  const depGraph = new DepGraph<PreprocessedCodeblock>();
+  headers: PreprocessedHeader[],
+): PreprocessedHeader[] {
+  const depGraph = new DepGraph<PreprocessedHeader>();
   const depGraphEdges: [string, string][] = [];
-  const classDefs: PreprocessedCodeblock[] = [];
-  for (const block of codeblocks) {
-    if (block.isSynopsis) {
-      depGraph.addNode(block.header, block);
-      for (const include of block.includes) {
-        depGraphEdges.push([block.header, include]);
-      }
-    } else {
-      classDefs.push(block);
+  for (const header of headers) {
+    depGraph.addNode(header.headerName, header);
+    for (const include of header.includes) {
+      depGraphEdges.push([header.headerName, include]);
     }
   }
-  return [
-    ...depGraph.overallOrder().map((header) => depGraph.getNodeData(header)),
-    ...classDefs,
-  ];
+  return depGraph.overallOrder().map((header) => depGraph.getNodeData(header));
 }

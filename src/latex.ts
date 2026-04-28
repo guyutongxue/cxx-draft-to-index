@@ -1,14 +1,7 @@
 import { Glob } from "bun";
 import { join, resolve } from "node:path";
+import { Codeblock, Header } from "./types";
 
-export interface Codeblock {
-  filename: string;
-  header: string;
-  isSynopsis: boolean;
-  sectionTitle: string;
-  sectionId: string;
-  code: string;
-}
 
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
 
@@ -124,6 +117,8 @@ const REQUIRED_MISSING_INCLUDES: Record<string, string[]> = {
   filesystem: ["ranges"],
   span: ["ranges"],
   optional: ["ranges"],
+  // containers, fs::path, and chrono, etc. uses std::formatter specializations, but its name 
+  // is unqualified so we don't care now. maybe we can fix that in the future if needed
 };
 
 function applyPatches(fileName: string, content: string): string {
@@ -169,13 +164,11 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
 
 export function extractHeaderSynopses(
   texFiles: Map<string, string>,
-): Codeblock[] {
-  const results: Codeblock[] = [];
-
+): Header[] {
+  const results: Header[] = [];
   for (const [fileName, content] of texFiles) {
     results.push(...new LaTeXFile(fileName, content).extract());
   }
-
   return results;
 }
 
@@ -211,38 +204,48 @@ class LaTeXFile {
   advLine() {
     this.lineIdx++;
     const match = /\\rSec\d\[([^\]]+)\]\{(.+)\}/.exec(this.line);
-    if (match) {
+    if (match && !/^overview|general$/i.test(match[2])) {
       this.sectionId = match[1];
       this.sectionTitle = match[2].replace(/\\\w+\{|\}/g, "").trim();
     }
   }
 
-  extract(): Codeblock[] {
-    const results: Codeblock[] = [];
+  extract(): Header[] {
+    const results: Header[] = [];
     while (this.lineIdx < this.lines.length) {
       const headerName = this.findNextHeaderMarker();
       if (headerName === null) {
         break;
       }
       this.advLine();
-      let isHeaderSyn = true;
+      let header: Header | null = null;
       while (true) {
         const code = this.findNextCodeblockInThisHeader();
         if (code === null) {
+          if (header) {
+            results.push(header);
+          }
           break;
         }
-        if (!isHeaderSyn && !isClassDefinitionCodeblock(code)) {
+        if (header && !isClassDefinitionCodeblock(code)) {
           continue;
         }
-        results.push({
-          header: headerName,
-          isSynopsis: isHeaderSyn,
-          code: this.prepareSynopsisCode(headerName, code, isHeaderSyn),
-          filename: this.filename,
+        const codeblock: Codeblock = {
+          isSynopsis: !header,
+          code: this.prepareSynopsisCode(headerName, code, !header),
           sectionTitle: this.sectionTitle,
           sectionId: this.sectionId,
-        });
-        isHeaderSyn = false;
+        };
+        if (!header) {
+          header = {
+            filename: this.filename,
+            headerName,
+            synopsis: codeblock,
+            classDefinitions: [],
+          };
+        } else {
+          header.classDefinitions.push(codeblock);
+        }
       }
     }
     return results;

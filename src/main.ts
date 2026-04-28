@@ -1,9 +1,6 @@
-import type {
-  IndexOutput,
-  SymbolEntry,
-} from "./types";
+import type { HeaderIndex, IndexOutput, SymbolEntry } from "./types";
 import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
-import { preprocessCodeblock, parseCodeblock } from "./cxx";
+import { preprocessHeader, parseCodeblock } from "./cxx";
 import { mergeSymbols } from "./merge";
 import { topologicalSort } from "./sort";
 import assert from "node:assert";
@@ -22,50 +19,48 @@ async function main() {
   console.log(`Found ${synopses.length} header synopses.\n`);
 
   console.log(`Preprocessing codeblocks...`);
-  const preprocessed = synopses.map(preprocessCodeblock);
+  const preprocessed = synopses.map(preprocessHeader);
   const totalIncludes = preprocessed.reduce(
-    (sum, cb) => sum + cb.includes.length,
+    (sum, cb) => sum + cb.includes.size,
     0,
   );
   console.log(
     `Preprocessed ${preprocessed.length} codeblocks (${totalIncludes} #include directives found).\n`,
   );
 
-  const sortedCodeblocks = topologicalSort(preprocessed);
+  const sortedHeaders = topologicalSort(preprocessed);
 
   const parsedSymbols: SymbolEntry[] = [];
-  const headers = new Map<string, SymbolEntry[]>();
+  const parsedHeaders: HeaderIndex[] = [];
 
-  for (const block of sortedCodeblocks) {
-    console.log(
-      `Parsing ${block.isSynopsis ? `<${block.header}>` : block.sectionTitle}...`,
-    );
-    const symbols = parseCodeblock(
-      block.preprocessedCode,
-      block.header,
-      parsedSymbols,
-    );
-    parsedSymbols.push(...symbols);
-    if (!headers.has(block.header)) {
-      headers.set(block.header, []);
+  for (const h of sortedHeaders) {
+    const headerSymbols: SymbolEntry[] = [];
+    for (const block of [h.synopsis, ...h.classDefinitions]) {
+      process.stdout.write(
+        block.isSynopsis ? `Parsing <${h.headerName}>` : `  Parsing ${block.sectionTitle}...`,
+      );
+      const symbols = parseCodeblock(
+        block.preprocessedCode,
+        h.headerName,
+        parsedSymbols,
+      );
+      parsedSymbols.push(...symbols);
+      headerSymbols.push(...block.macroSymbols, ...symbols);
+      console.log(`  -> ${symbols.length} symbols`);
     }
-    headers.get(block.header)!.push(...block.macroSymbols, ...symbols);
-    console.log(`  -> ${symbols.length} symbols`);
-  }
-
-  for (const [header, symbols] of headers) {
-    const mergedSymbols = mergeSymbols(symbols);
-    headers.set(header, mergedSymbols);
+    console.log(`-> ${headerSymbols.length} symbols`);
+    const mergedSymbols = mergeSymbols(headerSymbols);
     console.log(
-      `Merged symbols for <${header}>: ${symbols.length} -> ${mergedSymbols.length}`,
+      `Merged -> ${mergedSymbols.length} symbols`,
     );
-    assert(mergedSymbols.length <= symbols.length);
+    assert(mergedSymbols.length <= headerSymbols.length);
+    parsedHeaders.push({ header: h.headerName, symbols: mergedSymbols });
   }
 
   const output: IndexOutput = {
     version: "1.0.0",
     generated_at: new Date().toISOString(),
-    headers: Array.from(headers, ([header, symbols]) => ({ header, symbols })),
+    headers: parsedHeaders,
   };
 
   const outputPath = import.meta.dir

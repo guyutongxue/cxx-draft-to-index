@@ -15,15 +15,15 @@ namespace std {
     ],
   ]);
 
-  const synopses = extractHeaderSynopses(texFiles);
+  const headers = extractHeaderSynopses(texFiles);
 
-  expect(synopses).toHaveLength(1);
-  expect(synopses[0]).toMatchObject({
+  expect(headers).toHaveLength(1);
+  expect(headers[0]).toMatchObject({
     header: "span",
     filename: "span.tex",
   });
-  expect(synopses[0].code).toContain("#include <ranges>");
-  expect(synopses[0].code).toContain("void foo();");
+  expect(headers[0].synopsis.code).toContain("#include <ranges>");
+  expect(headers[0].synopsis.code).toContain("void foo();");
 });
 
 test("skips non-class codeblocks after the first synopsis", () => {
@@ -49,6 +49,7 @@ void first() {
   const synopses = extractHeaderSynopses(texFiles);
 
   expect(synopses).toHaveLength(1);
-  expect(synopses[0].code).toContain("first");
-  expect(synopses[0].code).not.toContain("implementation");
+  expect(synopses[0].classDefinitions).toHaveLength(0);
+  expect(synopses[0].synopsis.code).toContain("first");
+  expect(synopses[0].synopsis.code).not.toContain("implementation");
 });
