@@ -1,14 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "composite": true,
+    "emitDeclarationOnly": true,
     "lib": [
-      "DOM"
+      "ESNext",
+      "DOM",
     ],
     "types": [],
     "jsx": "react-jsx",
   },
-  "include": [
-    "src/web/**/*"
-  ]
+  "exclude": [],
+  "include": ["src/web", "src/types.ts"],
 }

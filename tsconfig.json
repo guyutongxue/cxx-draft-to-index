@@ -12,13 +12,21 @@
     "declaration": true,
     "emitDeclarationOnly": true,
 
+    "composite": true,
+    "incremental": true,
+    "outDir": "dist",
+
     "types": [
       "bun"
     ],
   },
   "include": [
     "src",
+    "dist/std-index.json",
     "__tests__"
+  ],
+  "exclude": [
+    "src/web"
   ],
   "references": [{ "path": "./tsconfig.web.json" }]
 }
