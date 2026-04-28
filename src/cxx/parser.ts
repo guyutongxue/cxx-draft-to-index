@@ -617,6 +617,9 @@ export class Parser {
       scopeClassName,
       contextType,
     });
+    if (declSpecifier.classSpecifier?.useKind === "friendType") {
+      this.unimplemented("friend type declaration");
+    }
 
     let declaratorList: DeclaratorListInfo | null = null;
 
@@ -704,9 +707,6 @@ export class Parser {
           }),
         );
       }
-    }
-    if (classSpecifier?.useKind === "friendType") {
-      this.unimplemented("friend type declaration");
     }
     if (enumSpecifier?.id) {
       symbols.push(
@@ -1507,12 +1507,22 @@ export class Parser {
     ];
   }
 
-  private parseUsingEnumDeclaration(): SymbolEntry[] {
+  private parseUsingEnumDeclaration({
+    startLoc,
+  }: {
+    startLoc: Location;
+  }): SymbolEntry[] {
     this.consumeId("enum");
-    this.readIdExpression();
+    const idExpr = this.readIdExpression();
     this.consumeP(";");
-    // TODO should we emit symbol for using enum declaration?
-    return [];
+    const raw = this.lexer.range(startLoc, this.tok.loc);
+    return [
+      this.buildSymbol("usingEnum", {
+        name: "",
+        target: idExpr.name,
+        raw,
+      }),
+    ];
   }
 
   private parseUsingDeclaration({
@@ -1529,7 +1539,7 @@ export class Parser {
 
     if (this.isId("enum")) {
       this.assert(!templateInfo, `using-enum cannot be templated`);
-      return this.parseUsingEnumDeclaration();
+      return this.parseUsingEnumDeclaration({ startLoc });
     }
 
     let idExpr = this.readIdExpression();
@@ -1772,8 +1782,6 @@ export class Parser {
     templateInfo: TemplateInfo;
     scopeClassName: string | null;
   }): SymbolEntry[] {
-    // TODO if we are in member context, dispatch to a member declaration
-
     this.tryParseAttribute();
 
     if (this.isId("using")) {
@@ -1813,7 +1821,6 @@ export class Parser {
       idExpr = this.readIdExpression();
     }
 
-    // TODO
     // friend class A, class B;
     // friend class Ts...;
     if (
