@@ -12,11 +12,16 @@ const LATEX_SIMPLE: Record<string, string> = {
   "\\expos": "/* exposition-only */",
 };
 
+const useExpositionOnlyReplace: unique symbol = Symbol(
+  "useExpositionOnlyReplace",
+);
 type Replacer = (match: string, ...groups: string[]) => string;
 const EXPOSITION_ONLY_REPLACER: Replacer = (match, name) =>
   `__${name.replaceAll("-", "_")}`;
+const EXPOSITION_ONLY_INLINE_REPLACER: Replacer = (match, name) =>
+  `⟨${name.replaceAll("-", "_")}⟩`;
 
-const LATEX_BRACED: [RegExp, string | Replacer][] = [
+const LATEX_BRACED: [RegExp, string | typeof useExpositionOnlyReplace][] = [
   // as-is replacement with LaTeX labels
   [/^\\libmacro\{([^}]+)\}$/g, "$1"],
   [/^\\defnlibxname\{([^}]+)\}$/g, "$1"],
@@ -30,23 +35,30 @@ const LATEX_BRACED: [RegExp, string | Replacer][] = [
   [/^\\iref\{([^}]+)\}$/g, ""],
 
   // exposition-only symbols, prefix with __
-  [/^\\defexposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\exposconcept\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\defexposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\exposconceptnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\exposid\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\exposidnc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\defexposconcept\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\exposconcept\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\defexposconceptnc\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\exposconceptnc\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\exposid\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\exposidnc\{([^}]+)\}$/g, useExpositionOnlyReplace],
   // placeholders
-  [/^\\placeholder\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
-  [/^\\placeholdernc\{([^}]+)\}$/g, EXPOSITION_ONLY_REPLACER],
+  [/^\\placeholder\{([^}]+)\}$/g, useExpositionOnlyReplace],
+  [/^\\placeholdernc\{([^}]+)\}$/g, useExpositionOnlyReplace],
 ];
 
-function resolveSingleLaTeX(text: string): string {
+function resolveSingleLaTeX(text: string, inline = false): string {
   if (typeof LATEX_SIMPLE[text] === "string") {
     return LATEX_SIMPLE[text];
   }
   for (const [regex, replacement] of LATEX_BRACED) {
-    text = text.replace(regex, replacement as string);
+    if (replacement === useExpositionOnlyReplace) {
+      text = text.replace(
+        regex,
+        inline ? EXPOSITION_ONLY_INLINE_REPLACER : EXPOSITION_ONLY_REPLACER,
+      );
+    } else {
+      text = text.replace(regex, replacement);
+    }
   }
   // \textit command: replace with comment and drop its all inner LaTeX commands
   if (
@@ -77,14 +89,14 @@ export function resolveLaTeXInText(text: string): string {
   let result = "";
   let i = 0;
   while (i < text.length) {
-    // TODO when text[i-1] is identifier start use "inline" resolving
     if (text[i] === "@") {
       let j = i + 1;
       while (j < text.length && text[j] !== "@") {
         j++;
       }
       if (j < text.length) {
-        result += resolveSingleLaTeX(text.slice(i + 1, j));
+        const inline = i > 0 && /[A-Za-z_]/.test(text[i - 1]);
+        result += resolveSingleLaTeX(text.slice(i + 1, j), inline);
         i = j + 1;
       } else {
         result += text.slice(i);
