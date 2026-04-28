@@ -20,4 +20,5 @@
     "src",
     "__tests__"
   ],
+  "references": [{ "path": "./tsconfig.web.json" }]
 }
