@@ -12,11 +12,13 @@ import type {
   TemplateParameter,
 } from "../types";
 import { SymbolCard } from "./SymbolCard";
-import type { FlatSymbol } from "./App";
+import { computeMemberLocalId } from "./symbol_id";
+import type { FlatSymbol } from "./DataContext";
 
 interface SymbolDetailProps {
-  selected: FlatSymbol | null;
-  onSelect: (fs: FlatSymbol) => void;
+  symbol: SymbolEntry;
+  header: string;
+  onMemberClick?: (member: SymbolEntry) => void;
 }
 
 function namespacePath(ns: NamespaceInfo[]): string {
@@ -122,7 +124,7 @@ function ParamTable({
         {params.map((p, i) =>
           typeof p === "string" ? (
             <tr key={i}>
-              <td colSpan={4} className="dim">
+              <td colSpan={3} className="dim">
                 {p}
               </td>
             </tr>
@@ -147,13 +149,13 @@ function ParamTable({
 function MembersSection({
   members,
   header,
-  selectedSymbol,
-  onSelect,
+  selectedMemberId,
+  onMemberClick,
 }: {
   members: ClassMemberEntry[];
   header: string;
-  selectedSymbol: FlatSymbol | null;
-  onSelect: (fs: FlatSymbol) => void;
+  selectedMemberId: string | null;
+  onMemberClick?: (member: SymbolEntry) => void;
 }) {
   return (
     <div className="symbol-detail-section">
@@ -161,17 +163,14 @@ function MembersSection({
         Members ({members.length})
       </div>
       {members.map((m, i) => {
+        const localId = computeMemberLocalId(m);
         const key = `${m.name}:${m.kind}:${i}`;
-        const isSelected =
-          selectedSymbol !== null &&
-          selectedSymbol.symbol.name === m.name &&
-          selectedSymbol.symbol.kind === m.kind;
         return (
           <SymbolCard
             key={key}
             fs={{ symbol: m, header }}
-            selected={isSelected}
-            onClick={() => onSelect({ symbol: m, header })}
+            selected={selectedMemberId === localId}
+            onClick={() => onMemberClick?.(m)}
             compact
           />
         );
@@ -180,16 +179,11 @@ function MembersSection({
   );
 }
 
-export function SymbolDetail({ selected, onSelect }: SymbolDetailProps) {
-  if (!selected) {
-    return (
-      <div className="symbol-detail-empty">
-        Select a symbol from the list to view details.
-      </div>
-    );
-  }
-
-  const { symbol, header: headerName } = selected;
+export function SymbolDetail({
+  symbol,
+  header: headerName,
+  onMemberClick,
+}: SymbolDetailProps) {
   const ns = namespacePath(symbol.namespace);
 
   const showTemplate = isTemplate(symbol.kind) && "templateParams" in symbol;
@@ -295,8 +289,6 @@ export function SymbolDetail({ selected, onSelect }: SymbolDetailProps) {
                 <span className="meta-value">trailing return type</span>
               </>
             )}
-            {/* <span className="meta-label">Parameters</span>
-            <span className="meta-value">{symbol.parameters.length}</span> */}
           </div>
           {symbol.parameters.length > 0 && (
             <div style={{ marginTop: 8 }}>
@@ -402,8 +394,8 @@ export function SymbolDetail({ selected, onSelect }: SymbolDetailProps) {
         <MembersSection
           members={symbol.members}
           header={headerName}
-          selectedSymbol={selected}
-          onSelect={onSelect}
+          selectedMemberId={null}
+          onMemberClick={onMemberClick}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
 import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../types";
-import type { FlatSymbol } from "./App";
+import type { FlatSymbol } from "./DataContext";
 
 export interface SymbolCardProps {
   fs: FlatSymbol;

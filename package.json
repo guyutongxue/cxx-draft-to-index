@@ -20,6 +20,7 @@
     "dependency-graph": "^1.0.0",
     "immer": "^11.1.4",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^7.14.2"
   }
 }
