@@ -1,12 +1,13 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import type { IndexOutput, SymbolEntry } from "../types";
-import { computeSymbolId } from "./symbol_id";
+import type { IndexOutput, SymbolEntry } from "../share/types";
+import { computeSymbolId } from "../share/symbol_id";
 
 const API_URL = "/std-index.json";
 
 export interface FlatSymbol {
   symbol: SymbolEntry;
-  header: string;
+  key: string;
+  headers: string[];
 }
 
 export interface DataContextValue {
@@ -21,21 +22,26 @@ const DataContext = createContext<DataContextValue>({
   topLevelMap: new Map(),
 });
 
-function flattenIndex(data: IndexOutput): FlatSymbol[] {
-  const result: FlatSymbol[] = [];
+function buildTopLevelMap(data: IndexOutput): Map<string, FlatSymbol> {
+  const map = new Map<string, FlatSymbol>();
   for (const hdr of data.headers) {
     for (const sym of hdr.symbols) {
-      result.push({ symbol: sym, header: hdr.header });
+      const key = computeSymbolId(sym);
+      if (map.has(key)) {
+        const existing = map.get(key)!;
+        if (!existing.headers.includes(hdr.header)) {
+          existing.headers.push(hdr.header);
+        } else {
+          console.warn(
+            `Duplicate symbol ID ${key} in header ${hdr.header}`,
+            existing.symbol,
+            sym,
+          );
+        }
+      } else {
+        map.set(key, { symbol: sym, headers: [hdr.header], key });
+      }
     }
-  }
-  return result;
-}
-
-function buildTopLevelMap(symbols: FlatSymbol[]): Map<string, FlatSymbol> {
-  const map = new Map<string, FlatSymbol>();
-  for (const fs of symbols) {
-    const id = computeSymbolId(fs.symbol);
-    map.set(id, fs);
   }
   return map;
 }
@@ -57,9 +63,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       })
       .then((json) => {
         setData(json);
-        const symbols = flattenIndex(json);
-        setAllSymbols(symbols);
-        setTopLevelMap(buildTopLevelMap(symbols));
+        const map = buildTopLevelMap(json);
+        setTopLevelMap(map);
+        setAllSymbols([...map.values()]);
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));

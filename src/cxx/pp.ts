@@ -1,4 +1,4 @@
-import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../types";
+import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../share/types";
 import { resolveLaTeXInText } from "./latex";
 
 export interface PreprocessResult {

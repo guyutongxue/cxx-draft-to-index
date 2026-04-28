@@ -1,8 +1,18 @@
-import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
+import {
+  useParams,
+  useNavigate,
+  Link,
+  useSearchParams,
+} from "react-router-dom";
 import { useData } from "./DataContext";
 import { SymbolDetail } from "./SymbolDetail";
-import { computeMemberLocalId } from "./symbol_id";
-import type { SymbolEntry, ClassSymbolEntry, UnionSymbolEntry } from "../types";
+import { computeMemberLocalId } from "../share/symbol_id";
+import type {
+  SymbolEntry,
+  ClassSymbolEntry,
+  UnionSymbolEntry,
+} from "../share/types";
+import { SymbolName } from "./SymbolName";
 
 function hasMembers(s: SymbolEntry): s is ClassSymbolEntry | UnionSymbolEntry {
   if (typeof s !== "object" || !s) return false;
@@ -61,15 +71,10 @@ export function SymbolDetailPage() {
 
   const tail = chain[chain.length - 1];
 
-  const handleMemberClick = (memberSymbol: SymbolEntry) => {
-    const localId = computeMemberLocalId(memberSymbol);
-    const base = `/symbols/${symbolId}`;
-    const memberSegments = chain
-      .slice(1)
-      .map((c) => `${c.id}`)
-      .join("/");
-    const prefix = memberSegments ? `${base}/${memberSegments}` : base;
-    navigate(`${prefix}/${localId}?${search}`);
+  const handleMemberClick = (memberId: string) => {
+    navigate(
+      `/symbols/${symbolId}/${splat ? `${splat}/` : ""}${memberId}?${search}`,
+    );
   };
 
   const parentSymbol = chain.length > 1 ? chain[chain.length - 2].symbol : null;
@@ -90,13 +95,14 @@ export function SymbolDetailPage() {
               navigate(`/symbols/${idChain}?${search}`);
             }}
           >
-            &larr; Back to {parentSymbol.name}
+            &larr; Back to {<SymbolName name={parentSymbol.name} />}
           </button>
         </div>
       )}
       <SymbolDetail
         symbol={tail.symbol}
-        header={entry.header}
+        headers={entry.headers}
+        key={tail.id}
         onMemberClick={handleMemberClick}
       />
     </div>
@@ -138,10 +144,12 @@ function Breadcrumb({
           <span key={i}>
             <span className="breadcrumb-sep">{">"}</span>
             {i === chain.length - 1 ? (
-              <span className="breadcrumb-current">{c.symbol.name}</span>
+              <span className="breadcrumb-current">
+                <SymbolName name={c.symbol.name} />
+              </span>
             ) : (
               <Link to={`${url}?${search}`} className="breadcrumb-link">
-                {c.symbol.name}
+                <SymbolName name={c.symbol.name} />
               </Link>
             )}
           </span>

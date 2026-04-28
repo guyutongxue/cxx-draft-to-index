@@ -8,10 +8,11 @@ import type {
   SymbolKind,
   Template,
   TemplateParameter,
-} from "../types";
+} from "../share/types";
 import { resolveLatex } from "./latex";
 import { Lexer, Location, Punctuation, Token, TokenType } from "./lexer";
 import { Draft, Immutable, produce } from "immer";
+import * as R from "remeda";
 
 interface ParserContext {
   readonly linkageStack: readonly string[];
@@ -253,8 +254,8 @@ interface FunctionSurrounding extends ParameterListInfo {
 
 interface FunctionInfo extends FunctionSurrounding {
   returnType: string | null;
-  constructor: boolean;
-  destructor: boolean;
+  ctor: boolean;
+  dtor: boolean;
 }
 
 type DeclaratorSurrounding =
@@ -771,11 +772,11 @@ export class Parser {
               : declSpecifier.explicitSpecifier.raw,
           friend: declSpecifier.declSpecifiers.includes("friend"),
           variadic: declarator.function.variadic,
-          constructor: declarator.function.constructor,
-          destructor: declarator.function.destructor,
+          ctor: declarator.function.ctor,
+          dtor: declarator.function.dtor,
           cvRef: [
-            declSpecifier.cvQualifiers.const ? "const" : null,
-            declSpecifier.cvQualifiers.volatile ? "volatile" : null,
+            declarator.function.qualifiers.const ? "const" : null,
+            declarator.function.qualifiers.volatile ? "volatile" : null,
             declarator.function.qualifiers.ref === "placeholder"
               ? "ref"
               : declarator.function.qualifiers.ref,
@@ -1266,10 +1267,10 @@ export class Parser {
         ? {
             ...surrounding[0],
             returnType: this.buildTypeInfo(declSpecifier, surrounding.slice(1)),
-            constructor:
+            ctor:
               declSpecifier.typeString === "" &&
               idExprKind === IdPartKind.Identifier,
-            destructor: idExprKind === IdPartKind.Destructor,
+            dtor: idExprKind === IdPartKind.Destructor,
           }
         : null;
     if (declSpecifier.typeString === "") {
@@ -2930,13 +2931,16 @@ export class Parser {
       Exclude<keyof SymbolEntryBase, "raw" | "name"> | "kind"
     >,
   ): ExtractKind<SymbolEntry, Kind> {
-    const result = {
-      kind,
-      ...info,
-      header: this.filename,
-      namespace: [...this.context.nsStack],
-      languageLinkage: this.context.linkageStack.at(-1) ?? null,
-    } as ExtractKind<SymbolEntry, Kind>;
+    const result = R.omitBy(
+      {
+        kind,
+        ...info,
+        header: this.filename,
+        namespace: [...this.context.nsStack],
+        languageLinkage: this.context.linkageStack.at(-1) ?? null,
+      } as SymbolEntry,
+      (x) => typeof x === "undefined",
+    ) as ExtractKind<SymbolEntry, Kind>;
     if (this.context.scopeState === "namespace") {
       this.context = produce(this.context, (ctx) => {
         ctx.builtSymbols.push(result);

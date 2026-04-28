@@ -1,6 +1,6 @@
 import { Glob } from "bun";
 import { join, resolve } from "node:path";
-import { Codeblock, Header } from "./types";
+import { Codeblock, Header } from "./share/types";
 
 
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");

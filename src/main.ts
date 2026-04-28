@@ -1,4 +1,4 @@
-import type { HeaderIndex, IndexOutput, SymbolEntry } from "./types";
+import type { HeaderIndex, IndexOutput, SymbolEntry } from "./share/types";
 import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
 import { preprocessHeader, parseCodeblock } from "./cxx";
 import { mergeSymbols } from "./merge";

@@ -46,6 +46,8 @@ body {
 }
 
 .search-bar {
+  display: flex;
+  gap: 8px;
   padding: 8px 16px 12px;
   border-bottom: 1px solid #21262d;
   background: #0d1117;
@@ -53,7 +55,7 @@ body {
 }
 
 .search-bar input {
-  width: 100%;
+  flex: 1;
   padding: 6px 12px;
   border: 1px solid #30363d;
   border-radius: 6px;
@@ -69,6 +71,28 @@ body {
 
 .search-bar input::placeholder {
   color: #484f58;
+}
+
+.search-bar button {
+  padding: 6px 16px;
+  background: #4896ef;
+  border: 1px solid #58a6ff;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.search-bar button:hover {
+  background: #58a6ff;
+  border-color: #79c0ff;
+}
+
+.search-bar button:active {
+  background: #4896ef;
 }
 
 .main-content {

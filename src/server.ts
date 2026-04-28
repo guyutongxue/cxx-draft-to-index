@@ -1,4 +1,4 @@
-import { IndexOutput } from "./types";
+import { IndexOutput } from "./share/types";
 import indexHtml from "./web/index.html";
 
 const indexData = Promise.resolve()

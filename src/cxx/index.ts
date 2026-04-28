@@ -4,7 +4,7 @@ import type {
   PreprocessedCodeblock,
   PreprocessedHeader,
   SymbolEntry,
-} from "../types";
+} from "../share/types";
 import { Lexer } from "./lexer";
 import { Parser } from "./parser";
 import { preprocessCode } from "./pp";

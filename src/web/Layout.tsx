@@ -1,10 +1,14 @@
-import { Outlet, useSearchParams, useNavigate, useMatch } from "react-router-dom";
+import {
+  Outlet,
+  useSearchParams,
+  useNavigate,
+  useMatch,
+} from "react-router-dom";
 import { useMemo } from "react";
 import { FlatSymbol, useData } from "./DataContext";
 import { SearchBar } from "./SearchBar";
 import { SymbolCard } from "./SymbolCard";
-import { computeSymbolId } from "./symbol_id";
-import { SymbolEntry } from "../types";
+import { SymbolEntry } from "../share/types";
 
 export function Layout() {
   const { data, allSymbols } = useData();
@@ -31,7 +35,7 @@ export function Layout() {
       }
       rank += name === q ? 0 : name.startsWith(q) ? 1 : 2;
       return rank;
-    }
+    };
     results.sort((a, b) => {
       const rankA = rank(a.symbol);
       const rankB = rank(b.symbol);
@@ -62,8 +66,10 @@ export function Layout() {
             isEmpty={allSymbols.length === 0}
             currentSymbolId={currentSymbolId}
             onNavigate={(fs) => {
-              const target = `/symbols/${computeSymbolId(fs.symbol)}`;
-              navigate(query ? `${target}?q=${encodeURIComponent(query)}` : target);
+              const target = `/symbols/${fs.key}`;
+              navigate(
+                query ? `${target}?q=${encodeURIComponent(query)}` : target,
+              );
             }}
           />
         </div>
@@ -107,14 +113,12 @@ function SidebarContent({
     );
   }
 
-  return symbols.map((fs, i) => {
-    const id = computeSymbolId(fs.symbol);
-    const key = `${fs.header}:${fs.symbol.name}:${i}`;
+  return symbols.map((fs) => {
     return (
       <SymbolCard
-        key={key}
+        key={fs.key}
         fs={fs}
-        selected={currentSymbolId === id}
+        selected={currentSymbolId === fs.key}
         onClick={() => onNavigate(fs)}
       />
     );

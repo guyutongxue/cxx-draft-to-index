@@ -1,44 +1,36 @@
-import { useState, useEffect, useRef } from "react";
+import { SubmitEvent, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export function SearchBar() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlQuery = searchParams.get("q") ?? "";
-  const [inputValue, setInputValue] = useState(urlQuery);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastUrlRef = useRef(urlQuery);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (urlQuery !== lastUrlRef.current) {
-      setInputValue(urlQuery);
-      lastUrlRef.current = urlQuery;
+    const query = searchParams.get("q") ?? "";
+    if (inputRef.current) {
+      inputRef.current.value = query;
     }
-  }, [urlQuery]);
+  }, []);
 
-  const debouncedSetQuery = (v: string) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (v) {
-        setSearchParams({ q: v }, { replace: true });
-      } else {
-        setSearchParams({}, { replace: true });
-      }
-    }, 200);
+  const handleSubmit = (e: SubmitEvent) => {
+    e.preventDefault();
+    const query = inputRef.current?.value ?? "";
+    if (query) {
+      setSearchParams({ q: query }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
   };
 
   return (
-    <div className="search-bar">
+    <form className="search-bar" onSubmit={handleSubmit}>
       <input
+        ref={inputRef}
         type="text"
-        value={inputValue}
-        onChange={(e) => {
-          const v = e.target.value;
-          setInputValue(v);
-          debouncedSetQuery(v);
-        }}
         placeholder='Search symbols by name (e.g. "vector", "begin", "is_same")'
         autoFocus
       />
-    </div>
+      <button type="submit">Search</button>
+    </form>
   );
 }

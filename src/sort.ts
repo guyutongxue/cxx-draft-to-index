@@ -1,5 +1,5 @@
 import { DepGraph } from "dependency-graph";
-import { PreprocessedHeader } from "./types";
+import { PreprocessedHeader } from "./share/types";
 
 export function topologicalSort(
   headers: PreprocessedHeader[],

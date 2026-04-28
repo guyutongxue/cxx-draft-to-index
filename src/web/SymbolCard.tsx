@@ -1,4 +1,4 @@
-import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../types";
+import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../share/types";
 import type { FlatSymbol } from "./DataContext";
 import { SymbolName } from "./SymbolName";
 
@@ -9,7 +9,7 @@ export interface SymbolCardProps {
   compact?: boolean;
 }
 
-function namespacePath(ns: NamespaceInfo[]): string {
+export function namespacePath(ns: NamespaceInfo[]): string {
   return ns.map((n) => n.name ?? "⟨anonymous⟩").join("::");
 }
 
@@ -19,7 +19,8 @@ interface BadgeInfo {
   shortText?: string;
 }
 
-export function getKindBadge(kind: SymbolKind, entry?: SymbolEntry): BadgeInfo {
+export function getKindBadge( entry: SymbolEntry): BadgeInfo {
+  const kind = entry.kind;
   if (kind === "class" && entry && "classKey" in entry) {
     return { className: `badge-${entry.classKey}`, text: entry.classKey };
   }
@@ -44,7 +45,13 @@ export function getKindBadge(kind: SymbolKind, entry?: SymbolEntry): BadgeInfo {
       shortText: `${entry.classKey} partial spec.`,
     };
   }
-  
+  if ("ctor" in entry && entry.ctor) {
+    return { className: "badge-function", text: "constructor" };
+  }
+   if ("dtor" in entry && entry.dtor) {
+    return { className: "badge-function", text: "destructor" };
+  }
+
   const map: Record<string, BadgeInfo> = {
     union: { className: "badge-union", text: "union" },
     enum: { className: "badge-enum", text: "enum" },
@@ -137,15 +144,17 @@ export function SymbolCard(props: SymbolCardProps) {
 
 export function SymbolCardContent({ fs, compact, onClick }: SymbolCardProps) {
   const ns = namespacePath(fs.symbol.namespace);
-  const badge = getKindBadge(fs.symbol.kind, fs.symbol);
+  const badge = getKindBadge(fs.symbol);
 
   return (
     <>
       <div className="symbol-card-aux">
         {ns && <span className="symbol-card-namespace">{ns}</span>}
-        <span className={`badge ${badge.className}`}>{badge.shortText || badge.text}</span>
-        {!compact && (
-          <span className="symbol-card-header">&lt;{fs.header}&gt;</span>
+        <span className={`badge ${badge.className}`}>
+          {badge.shortText || badge.text}
+        </span>
+        {!compact && fs.headers[0] && (
+          <span className="symbol-card-header">&lt;{fs.headers[0]}&gt;</span>
         )}
       </div>
       <span className="symbol-card-name" onClick={onClick}>

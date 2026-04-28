@@ -10,19 +10,14 @@ import type {
   NamespaceInfo,
   Parameter,
   TemplateParameter,
-} from "../types";
-import { getKindBadge, SymbolCardContent } from "./SymbolCard";
+} from "../share/types";
+import { getKindBadge, namespacePath, SymbolCardContent } from "./SymbolCard";
 import { SymbolName } from "./SymbolName";
-import { computeMemberLocalId } from "./symbol_id";
+import { computeMemberLocalId } from "../share/symbol_id";
+import { FlatSymbol } from "./DataContext";
 
-interface SymbolDetailProps {
-  symbol: SymbolEntry;
-  header: string;
-  onMemberClick?: (member: SymbolEntry) => void;
-}
-
-function namespacePath(ns: NamespaceInfo[]): string {
-  return ns.map((n) => n.name ?? "{anonymous}").join("::");
+interface SymbolDetailProps extends FlatSymbol {
+  onMemberClick?: (symbolId: string) => void;
 }
 
 function isTemplate(kind: SymbolKind): boolean {
@@ -110,14 +105,14 @@ function ParamTable({
 
 function MembersSection({
   members,
-  header,
+  headers,
   selectedMemberId,
   onMemberClick,
 }: {
   members: ClassMemberEntry[];
-  header: string;
+  headers: string[];
   selectedMemberId: string | null;
-  onMemberClick?: (member: SymbolEntry) => void;
+  onMemberClick?: (symbolId: string) => void;
 }) {
   return (
     <div className="symbol-detail-section">
@@ -126,14 +121,13 @@ function MembersSection({
       </div>
       <div className="member-list">
         {members.map((m, i) => {
-          const localId = computeMemberLocalId(m);
-          const key = `${m.name}:${m.kind}:${i}`;
+          const symbolId = computeMemberLocalId(m);
           return (
             <SymbolCardContent
-              key={key}
-              fs={{ symbol: m, header }}
-              selected={selectedMemberId === localId}
-              onClick={() => onMemberClick?.(m)}
+              key={symbolId}
+              fs={{ symbol: m, key: symbolId, headers }}
+              selected={selectedMemberId === symbolId}
+              onClick={() => onMemberClick?.(symbolId)}
               compact
             />
           );
@@ -145,11 +139,11 @@ function MembersSection({
 
 export function SymbolDetail({
   symbol,
-  header: headerName,
+  headers,
   onMemberClick,
 }: SymbolDetailProps) {
   const ns = namespacePath(symbol.namespace);
-  const badge = getKindBadge(symbol.kind, symbol);
+  const badge = getKindBadge(symbol);
 
   const showTemplate = isTemplate(symbol.kind) && "templateParams" in symbol;
   const showSpecialization =
@@ -168,7 +162,9 @@ export function SymbolDetail({
         </div>
         {ns && <div className="symbol-detail-namespace">namespace {ns}</div>}
         <div className="symbol-detail-badges">
-          <span className="badge badge-tag">&lt;{headerName}&gt;</span>
+          {headers.map((header) => (
+            <span className="badge badge-tag" key={header}>&lt;{header}&gt;</span>
+          ))}
           <span className={`badge ${badge.className}`}>{badge.text}</span>
           {symbol.languageLinkage && (
             <span className="badge badge-tag">
@@ -201,10 +197,10 @@ export function SymbolDetail({
           {showFunction && symbol.variadic && (
             <span className="badge badge-tag">variadic</span>
           )}
-          {showFunction && symbol.constructor && (
+          {showFunction && symbol.ctor && (
             <span className="badge badge-tag">constructor</span>
           )}
-          {showFunction && symbol.destructor && (
+          {showFunction && symbol.dtor && (
             <span className="badge badge-tag">destructor</span>
           )}
           {"syntax" in symbol && symbol.syntax === "typedef" && (
@@ -358,7 +354,7 @@ export function SymbolDetail({
       {showMembers && hasMembers(symbol) && symbol.members && (
         <MembersSection
           members={symbol.members}
-          header={headerName}
+          headers={headers}
           selectedMemberId={null}
           onMemberClick={onMemberClick}
         />

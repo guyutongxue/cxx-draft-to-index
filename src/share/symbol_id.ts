@@ -1,4 +1,4 @@
-import type { SymbolEntry, TemplateParameter, Parameter } from "../types";
+import type { SymbolEntry, TemplateParameter, Parameter } from "./types";
 
 function templateParamKey(param: TemplateParameter): string {
   return (
@@ -12,10 +12,12 @@ function paramsKey(params: (Parameter | string)[]): string {
   return params.map((p) => (typeof p === "string" ? p : p.type)).join(",");
 }
 
-function computeIdImpl(
-  symbol: SymbolEntry,
-  namespace: string | null,
-): string {
+const cache = new WeakMap<SymbolEntry, string>();
+
+function computeIdImpl(symbol: SymbolEntry, namespace: string | null): string {
+  if (cache.has(symbol)) {
+    return cache.get(symbol)!;
+  }
   let id = "";
   if (namespace) {
     id += namespace + "::";
@@ -25,11 +27,15 @@ function computeIdImpl(
     id += `<${symbol.templateParams.map((tp) => templateParamKey(tp)).join(",")}>`;
   }
   if ("templateArgs" in symbol) {
-     id += `<${symbol.templateArgs.join(",")}>`;
+    id += `<${symbol.templateArgs.join(",")}>`;
   }
   if ("parameters" in symbol) {
     id += `(${paramsKey(symbol.parameters)})`;
   }
+  if ("cvRef" in symbol) {
+    id += symbol.cvRef.replace(/\s+/g, "");
+  }
+  cache.set(symbol, id);
   return id;
 }
 
