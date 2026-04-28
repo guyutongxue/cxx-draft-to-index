@@ -19,7 +19,7 @@ namespace std {
 
   expect(headers).toHaveLength(1);
   expect(headers[0]).toMatchObject({
-    header: "span",
+    headerName: "span",
     filename: "span.tex",
   });
   expect(headers[0].synopsis.code).toContain("#include <ranges>");
