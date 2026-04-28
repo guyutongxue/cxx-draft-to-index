@@ -59,7 +59,12 @@ function resolveSingleLaTeX(text: string): string {
 }
 
 export function resolveLatex(tok: Token): string {
-  if (tok.type !== TokenType.LatexEscape) return tok.value;
+  if (tok.type !== TokenType.LatexEscape) {
+    if (tok.value.includes("@")) {
+      return resolveLaTeXInText(tok.value);
+    }
+    return tok.value;
+  }
   return resolveSingleLaTeX(tok.value.slice(1, -1));
 }
 
@@ -72,6 +77,7 @@ export function resolveLaTeXInText(text: string): string {
   let result = "";
   let i = 0;
   while (i < text.length) {
+    // TODO when text[i-1] is identifier start use "inline" resolving
     if (text[i] === "@") {
       let j = i + 1;
       while (j < text.length && text[j] !== "@") {

@@ -11,9 +11,9 @@ import type {
   Parameter,
   TemplateParameter,
 } from "../types";
-import { SymbolCard } from "./SymbolCard";
+import { SymbolCardContent } from "./SymbolCard";
+import { SymbolName } from "./SymbolName";
 import { computeMemberLocalId } from "./symbol_id";
-import type { FlatSymbol } from "./DataContext";
 
 interface SymbolDetailProps {
   symbol: SymbolEntry;
@@ -162,19 +162,21 @@ function MembersSection({
       <div className="symbol-detail-section-title">
         Members ({members.length})
       </div>
-      {members.map((m, i) => {
-        const localId = computeMemberLocalId(m);
-        const key = `${m.name}:${m.kind}:${i}`;
-        return (
-          <SymbolCard
-            key={key}
-            fs={{ symbol: m, header }}
-            selected={selectedMemberId === localId}
-            onClick={() => onMemberClick?.(m)}
-            compact
-          />
-        );
-      })}
+      <div className="member-list">
+        {members.map((m, i) => {
+          const localId = computeMemberLocalId(m);
+          const key = `${m.name}:${m.kind}:${i}`;
+          return (
+            <SymbolCardContent
+              key={key}
+              fs={{ symbol: m, header }}
+              selected={selectedMemberId === localId}
+              onClick={() => onMemberClick?.(m)}
+              compact
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -198,7 +200,9 @@ export function SymbolDetail({
   return (
     <div className="symbol-detail-panel">
       <div className="symbol-detail-header">
-        <div className="symbol-detail-name">{symbol.name}</div>
+        <div className="symbol-detail-name">
+          <SymbolName name={symbol.name} />
+        </div>
         {ns && <div className="symbol-detail-namespace">namespace {ns}</div>}
         <div className="symbol-detail-badges">
           <span className="badge badge-tag">&lt;{headerName}&gt;</span>
@@ -210,31 +214,37 @@ export function SymbolDetail({
               extern "{symbol.languageLinkage}"
             </span>
           )}
-          {showFunction && isFunction(symbol) && symbol.constexpr && (
+          {showFunction && symbol.constexpr && (
             <span className="badge badge-concept">constexpr</span>
           )}
-          {showFunction && isFunction(symbol) && symbol.explicit && (
+          {showFunction && symbol.explicit && (
             <span className="badge badge-enum">explicit</span>
           )}
-          {showFunction && isFunction(symbol) && symbol.friend && (
+          {showFunction && symbol.friend && (
             <span className="badge badge-friend">friend</span>
           )}
-          {showFunction && isFunction(symbol) && symbol.operator && (
+          {showFunction && symbol.operator && (
             <span className="badge badge-deduction">
               operator{symbol.operator === '""ms' ? '""...' : symbol.operator}
             </span>
           )}
-          {showVariable && isVariable(symbol) && symbol.constexpr && (
+          {showVariable && symbol.constexpr && (
             <span className="badge badge-concept">constexpr</span>
           )}
-          {showVariable && isVariable(symbol) && symbol.inline && (
+          {showVariable && symbol.inline && (
             <span className="badge badge-concept">inline</span>
           )}
-          {showVariable && isVariable(symbol) && symbol.extern && (
+          {showVariable && symbol.extern && (
             <span className="badge badge-tag">extern</span>
           )}
-          {showFunction && isFunction(symbol) && symbol.variadic && (
+          {showFunction && symbol.variadic && (
             <span className="badge badge-tag">variadic</span>
+          )}
+          {showFunction && symbol.constructor && (
+            <span className="badge badge-tag">constructor</span>
+          )}
+          {showFunction && symbol.destructor && (
+            <span className="badge badge-tag">destructor</span>
           )}
           {"syntax" in symbol && symbol.syntax === "typedef" && (
             <span className="badge badge-enum">typedef</span>
@@ -278,18 +288,12 @@ export function SymbolDetail({
       {showFunction && isFunction(symbol) && (
         <div className="symbol-detail-section">
           <div className="symbol-detail-section-title">Signature</div>
-          <div className="meta-grid">
-            <span className="meta-label">Return type</span>
-            <span className="meta-value">
-              {symbol.returnType || "(ctor/dtor)"}
-            </span>
-            {symbol.isTrailingReturnType && (
-              <>
-                <span className="meta-label">Style</span>
-                <span className="meta-value">trailing return type</span>
-              </>
-            )}
-          </div>
+          {symbol.returnType && (
+            <div className="meta-grid">
+              <span className="meta-label">Return type</span>
+              <span className="meta-value">{symbol.returnType}</span>
+            </div>
+          )}
           {symbol.parameters.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <ParamTable params={symbol.parameters} />

@@ -105,6 +105,7 @@ body {
 
 .symbol-card {
   display: flex;
+  flex-direction: row-reverse;
   align-items: baseline;
   gap: 8px;
   padding: 6px 12px;
@@ -136,7 +137,11 @@ body {
   min-width: 0;
 }
 
-.symbol-card-right {
+.exposition-only {
+  font-style: italic;
+}
+
+.symbol-card-aux {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -332,6 +337,16 @@ body {
   gap: 4px;
   flex-wrap: wrap;
   margin-left: auto;
+}
+
+.member-list {
+  display: grid;
+  grid-template-columns: min-content 1fr;
+  gap: 8px;
+}
+
+.member-list .symbol-card-name {
+  cursor: pointer;
 }
 
 .loading {

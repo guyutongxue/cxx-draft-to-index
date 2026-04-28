@@ -83,6 +83,9 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
   variadic: boolean;
   // void foo() requires <constraints>;
   signatureRequires: string | null;
+  constructor: boolean;
+  destructor: boolean;
+  cvRef: string; // "" for none; "const" "const &" "&&" etc.
 }
 
 export interface FriendTypeSymbolEntry extends SymbolEntryBase {

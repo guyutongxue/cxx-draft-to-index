@@ -362,7 +362,7 @@ export class Parser {
   }
 
   private resolved(tok: Token): string {
-    return tok.type === TokenType.LatexEscape ? resolveLatex(tok) : tok.value;
+    return resolveLatex(tok);
   }
 
   // MARK: ---- Balanced skip helpers ----
@@ -759,14 +759,30 @@ export class Parser {
           defaultArg: p.defaultArg?.raw ?? null,
           pack: p.pack,
         }));
-        const returnType = declarator.function.returnType;
-        const isTrailingReturnType = !!declarator.function.trailingReturnType;
-        const explicit =
-          typeof declSpecifier.explicitSpecifier === "boolean"
-            ? declSpecifier.explicitSpecifier
-            : declSpecifier.explicitSpecifier.raw;
-        const variadic = declarator.function.variadic;
-        const friend = declSpecifier.declSpecifiers.includes("friend");
+        const misc = {
+          operator,
+          parameters,
+          returnType: declarator.function.returnType,
+          isTrailingReturnType: !!declarator.function.trailingReturnType,
+          constexpr,
+          explicit:
+            typeof declSpecifier.explicitSpecifier === "boolean"
+              ? declSpecifier.explicitSpecifier
+              : declSpecifier.explicitSpecifier.raw,
+          friend: declSpecifier.declSpecifiers.includes("friend"),
+          variadic: declarator.function.variadic,
+          constructor: declarator.function.constructor,
+          destructor: declarator.function.destructor,
+          cvRef: [
+            declSpecifier.cvQualifiers.const ? "const" : null,
+            declSpecifier.cvQualifiers.volatile ? "volatile" : null,
+            declarator.function.qualifiers.ref === "placeholder"
+              ? "ref"
+              : declarator.function.qualifiers.ref,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        };
         if (
           declSpecifier.typeSpecifiers.length === 0 &&
           declarator.function.trailingReturnType
@@ -810,15 +826,8 @@ export class Parser {
                 name: this.removeTemplateArgsFromId(declarator.idExpr).name,
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 templateArgs: idLastPart.templateArgs.map((a) => a.raw),
-                operator,
-                parameters,
-                returnType,
-                isTrailingReturnType,
-                constexpr,
-                explicit,
-                friend,
-                variadic,
                 signatureRequires: declarator.function.constraint?.raw || null,
+                ...misc,
               }),
             );
           } else {
@@ -828,18 +837,11 @@ export class Parser {
             symbols.push(
               this.buildSymbol("functionTemplate", {
                 name: declarator.idExpr.name,
-                operator,
-                parameters,
                 raw: this.lexer.range(startLoc, this.tok.loc),
-                returnType,
-                isTrailingReturnType,
-                constexpr,
-                explicit,
-                friend,
-                variadic,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
                 signatureRequires: declarator.function.constraint?.raw || null,
+                ...misc,
               }),
             );
           }
@@ -848,16 +850,9 @@ export class Parser {
           symbols.push(
             this.buildSymbol("function", {
               name: declarator.idExpr.name,
-              operator,
-              parameters,
               raw: declSpecifier.raw + " " + declarator.raw + ";",
-              returnType,
-              isTrailingReturnType,
-              constexpr,
-              explicit,
-              friend,
-              variadic,
               signatureRequires: null,
+              ...misc,
             }),
           );
         }
@@ -1651,11 +1646,7 @@ export class Parser {
         {
           using transaction = this.createRevertTransaction();
           const idExpression = this.tryReadIdExpression();
-          if (
-            idExpression &&
-            idExpression.parts.length === 1 &&
-            idExpression.parts[0].conceptName
-          ) {
+          if (idExpression?.parts.at(-1)?.conceptName) {
             kind = "type";
             typeInfo = idExpression.name;
             readNameAndDefaultArg();
@@ -2460,7 +2451,9 @@ export class Parser {
         name += " " + declarator.typeInfo;
       }
     } else if (this.isIdentifierOrLaTeX()) {
-      conceptName = this.tok.value.includes("\\libconcept");
+      conceptName =
+        this.tok.value.includes("\\libconcept") ||
+        this.tok.value.includes("\\exposconcept");
       value = this.resolved(this.tok);
       name += value;
       this.adv();

@@ -1,9 +1,10 @@
 import { Outlet, useSearchParams, useNavigate, useMatch } from "react-router-dom";
 import { useMemo } from "react";
-import { useData } from "./DataContext";
+import { FlatSymbol, useData } from "./DataContext";
 import { SearchBar } from "./SearchBar";
 import { SymbolCard } from "./SymbolCard";
 import { computeSymbolId } from "./symbol_id";
+import { SymbolEntry } from "../types";
 
 export function Layout() {
   const { data, allSymbols } = useData();
@@ -13,11 +14,30 @@ export function Layout() {
   const detailMatch = useMatch("symbols/:symbolId/*");
 
   const filteredSymbols = useMemo(() => {
-    if (!query.trim()) return allSymbols;
+    // if (!query.trim()) return allSymbols;
     const q = query.toLowerCase();
-    return allSymbols.filter((fs) =>
+    const results = allSymbols.filter((fs) =>
       fs.symbol.name.toLowerCase().includes(q),
     );
+    const rank = (s: SymbolEntry) => {
+      let name = s.name.toLowerCase();
+      let rank = 0;
+      if (name.startsWith("__")) {
+        name = name.slice(2);
+        rank += 10;
+      }
+      rank += name === q ? 0 : name.startsWith(q) ? 1 : 2;
+      return rank;
+    }
+    results.sort((a, b) => {
+      const rankA = rank(a.symbol);
+      const rankB = rank(b.symbol);
+      if (rankA !== rankB) return rankA - rankB;
+      const nameA = a.symbol.name.toLowerCase();
+      const nameB = b.symbol.name.toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+    return results;
   }, [allSymbols, query]);
 
   const currentSymbolId = detailMatch?.params.symbolId ?? null;
@@ -57,23 +77,23 @@ function SidebarContent({
   currentSymbolId,
   onNavigate,
 }: {
-  symbols: import("./DataContext").FlatSymbol[];
+  symbols: FlatSymbol[];
   query: string;
   isEmpty: boolean;
   currentSymbolId: string | null;
-  onNavigate: (fs: import("./DataContext").FlatSymbol) => void;
+  onNavigate: (fs: FlatSymbol) => void;
 }) {
   if (isEmpty) {
     return <div className="symbol-list-empty">No symbols loaded.</div>;
   }
 
-  if (!query.trim()) {
-    return (
-      <div className="symbol-list-empty">
-        Enter a search term to find symbols.
-      </div>
-    );
-  }
+  // if (!query.trim()) {
+  //   return (
+  //     <div className="symbol-list-empty">
+  //       Enter a search term to find symbols.
+  //     </div>
+  //   );
+  // }
 
   if (symbols.length === 0) {
     return (
