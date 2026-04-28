@@ -9,7 +9,7 @@ const indexData = Promise.resolve()
 const server = Bun.serve({
   port: import.meta.env.PORT || 3000,
   routes: {
-    "/api/data": async () => {
+    "/std-index.json": async () => {
       return Response.json(await indexData);
     },
     "/*": indexHtml,

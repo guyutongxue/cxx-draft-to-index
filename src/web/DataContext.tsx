@@ -2,6 +2,8 @@ import { createContext, useContext, useState, useEffect } from "react";
 import type { IndexOutput, SymbolEntry } from "../types";
 import { computeSymbolId } from "./symbol_id";
 
+const API_URL = "/std-index.json";
+
 export interface FlatSymbol {
   symbol: SymbolEntry;
   header: string;
@@ -48,7 +50,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/data")
+    fetch(API_URL)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json() as Promise<IndexOutput>;
