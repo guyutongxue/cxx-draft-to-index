@@ -679,7 +679,7 @@ export class Parser {
       } else if (templateInfo) {
         if (templateInfo.fullSpecialization) {
           this.assert(
-            classSpecifier.templateArgs,
+            classSpecifier.id.parts.length > 1 || classSpecifier.templateArgs,
             "full specialization must have template args",
           );
           symbols.push(
@@ -691,7 +691,7 @@ export class Parser {
                 classKey: classSpecifier.tagKind,
                 base,
                 raw: this.lexer.range(startLoc, this.tok.loc),
-                templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
+                templateArgs: classSpecifier.templateArgs?.map((a) => a.raw),
                 members: classSpecifier.members,
                 access,
               },
@@ -1148,13 +1148,16 @@ export class Parser {
         declSpecifier.declSpecifiers[0] === "friend" &&
         (this.isP(",") || this.isP("..."))
       ) {
-        const friendTypes = this.parseFriendTypeDeclaration({ declSpecifier, access });
+        const friendTypes = this.parseFriendTypeDeclaration({
+          declSpecifier,
+          access,
+        });
         return {
           declarators: [],
           kind: "friendType",
           specialFunctionBody: null,
           friendTypes,
-        }
+        };
       }
       const declarator = this.parseDeclarator({
         declSpecifier,
@@ -2084,13 +2087,15 @@ export class Parser {
       firstExpand = true;
     }
     // first friend declaration was parsed as typeSpecifier in declaration specifiers
-    result.push(this.buildSymbol("friendType", {
-      name: "", // friend type declartion do not introduce name, sames below
-      raw: declSpecifier.raw + ";",
-      access,
-      expand: firstExpand,
-      targetType: declSpecifier.typeString,
-    }))
+    result.push(
+      this.buildSymbol("friendType", {
+        name: "", // friend type declartion do not introduce name, sames below
+        raw: declSpecifier.raw + ";",
+        access,
+        expand: firstExpand,
+        targetType: declSpecifier.typeString,
+      }),
+    );
     if (this.isP(";")) {
       return result;
     }
@@ -2099,7 +2104,11 @@ export class Parser {
       const startLoc = this.tok.loc;
       if (this.isId("typename")) {
         this.consumeId("typename");
-      } else if (this.isId("class") || this.isId("struct") || this.isId("union")) {
+      } else if (
+        this.isId("class") ||
+        this.isId("struct") ||
+        this.isId("union")
+      ) {
         // elaborated type specifier
         this.adv();
         this.tryParseAttribute();
@@ -2111,13 +2120,15 @@ export class Parser {
         this.consumeP("...");
         expand = true;
       }
-      result.push(this.buildSymbol("friendType", {
-        name: "",
-        raw: declSpecifier.raw + " " + raw + (expand ? "..." : "") + ";",
-        access,
-        expand,
-        targetType: idExpr.name,
-      }));
+      result.push(
+        this.buildSymbol("friendType", {
+          name: "",
+          raw: declSpecifier.raw + " " + raw + (expand ? "..." : "") + ";",
+          access,
+          expand,
+          targetType: idExpr.name,
+        }),
+      );
       if (this.isP(";")) {
         break;
       }
@@ -2678,14 +2689,14 @@ export class Parser {
 
   private lookupId(
     id: IdExpressionInfo,
-    templateHeads: readonly PlainTemplateInfo[],
+    templateInfo: TemplateInfo | null,
     failureHint?: string,
   ): Immutable<SymbolEntry>[] | null {
     const allSymbols = [...this.parsedSymbols, ...this.context.builtSymbols];
     const currentNs = id.fromGlobal ? [] : this.context.nsStack;
     const result = this.lookupIdImpl(
       id.parts,
-      templateHeads,
+      templateInfo ? [...templateInfo.nested, templateInfo] : [],
       currentNs,
       allSymbols,
     );
@@ -2739,42 +2750,54 @@ export class Parser {
         continue;
       }
       const matchTemplate = (idPart: IdExpressionPartInfo) => {
+        // Case 1: primary template (ends with "Template")
         if (sym.kind.endsWith("Template")) {
           const sym2 = sym as Extract<
             SymbolEntry,
             { kind: `${string}Template` }
           >;
-          // looks up to a main template `template <typename T> C`.
-          // - if it is the last part, then the syntax should be:
-          //   `template <typename T> Foo::Bar::C`
-          // - otherwise the syntax should be
-          //   `template <typename T> Foo::C<T>::Bar`
           if (parts.length === 1) {
+            // Last part: the template head (if any) applies to this symbol.
+            // E.g. `template <typename T> Foo::Bar::C` — T matches C's param count.
             return (
               currentTemplateHeads.length === 1 &&
               currentTemplateHeads[0].templateParameters.length ===
                 sym2.templateParams.length
             );
-          } else {
-            const currentTemplateHead = currentTemplateHeads.shift()!;
-            if (!currentTemplateHead || !idPart.templateArgs) {
-              return false;
-            }
-            const argListOfCurrentTemplateHead =
-              currentTemplateHead.templateParameters
+          }
+          // Non-last part: id part may carry template args
+          // E.g. `template <typename T> Foo::C<T>::Bar` (args are formal params)
+          // or   `class A<int>::B` (args are concrete types, no template head)
+          if (!idPart.templateArgs) {
+            return false;
+          }
+          // Try to consume a matching template head if present.
+          // Only consume if head params match the id part's template args
+          // (meaning the args are formal params from the template head).
+          // If head has 0 params (full-specialization head `template<>`),
+          // or params don't match, leave it for inner parts.
+          if (idPart.templateArgs.length === sym2.templateParams.length) {
+            const headToCheck = currentTemplateHeads[0];
+            if (headToCheck) {
+              const argListOfHead = headToCheck.templateParameters
                 .map((param) => `${param.name}${param.pack ? "..." : ""}`)
                 .join(", ");
-            const argListString = idPart.templateArgs
-              .map((arg) => arg.raw)
-              .join(", ");
-            return argListOfCurrentTemplateHead === argListString;
+              const argListOfIdPart = idPart.templateArgs
+                .map((arg) => arg.raw)
+                .join(", ");
+              if (argListOfHead === argListOfIdPart) {
+                currentTemplateHeads.shift();
+              }
+            }
           }
+          return true;
         }
-        // looks up to plain entity
+        // Case 2: id part has no template args — matches any plain or specialized entity
         if (!idPart.templateArgs) {
           return true;
         }
-        // looks up to partial specialization
+        // Case 3: partial specialization (has both templateParams and templateArgs)
+        // Must consume a template head whose params match the specialization's params.
         if ("templateParams" in sym && sym.templateParams) {
           const currentTemplateHead = currentTemplateHeads.shift();
           if (!currentTemplateHead) {
@@ -2801,6 +2824,7 @@ export class Parser {
             return false;
           }
         }
+        // Case 4: full specialization (has templateArgs only) or after Case 3 falls through
         if (!("templateArgs" in sym) || !sym.templateArgs) {
           return false;
         } else if (idPart.templateArgs.length !== sym.templateArgs.length) {
@@ -3126,8 +3150,11 @@ export class Parser {
     id: IdExpressionInfo,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
-      Exclude<keyof SymbolEntryBase, "raw" | "access"> | "kind" | keyof Template
-    >,
+      | Exclude<keyof SymbolEntryBase, "raw" | "access">
+      | "kind"
+      | keyof Template
+      | "templateArgs"
+    > & { templateArgs?: string[] },
   ): SymbolEntry {
     this.assert(
       id.parts.length > 0,
@@ -3174,7 +3201,7 @@ export class Parser {
       const [forwardDeclSymbol, ...scopeSymbols] =
         this.lookupId(
           idExprWithoutTemplateArgs,
-          templateInfo ? [...templateInfo.nested, templateInfo] : [],
+          templateInfo,
           `building nested symbol`,
         ) ?? [];
       if (!forwardDeclSymbol) {

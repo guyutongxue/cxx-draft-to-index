@@ -102,6 +102,54 @@ void foo(int t = sizeof...(Args));
   });
 });
 
+test("nested class in specialization (not redeclaration)", () => {
+  const code = String.raw`
+template<typename T>
+struct A {
+  class B;
+};
+
+struct A<int>::B { };
+`;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  // The definition of B inside A<int>::B nests B as a member of A
+  // (the template A is used as parent scope)
+  const aSymbol = symbols.find((s) => s.name === "A");
+  expect(aSymbol).toBeDefined();
+  expect(aSymbol).toHaveProperty("kind", "classTemplate");
+  expect("members" in aSymbol! && aSymbol.members).toBeTruthy();
+  const bMember = (aSymbol! as any).members?.find((m: any) => m.name === "B");
+  expect(bMember).toMatchObject({
+    kind: "class",
+    name: "B",
+  });
+});
+
+test("nested class in full specialization (template<>)", () => {
+  const code = String.raw`
+template<typename T>
+struct A {
+  class B;
+};
+
+template<>
+struct A<int>::B { };
+`;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  const aSymbol = symbols.find((s) => s.name === "A" && s.kind === "classTemplate");
+  expect(aSymbol).toBeDefined();
+  expect("members" in aSymbol! && aSymbol.members).toBeTruthy();
+  const bMember = (aSymbol! as any).members?.find((m: any) => m.name === "B");
+  expect(bMember).toMatchObject({
+    kind: "class",
+    name: "B",
+  });
+});
+
 test("friend type declaration", () => {
   const code = String.raw`
 class A {};
