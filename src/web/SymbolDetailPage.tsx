@@ -4,8 +4,8 @@ import {
   Link,
   useSearchParams,
 } from "react-router-dom";
-import { namespacePath, useData } from "./DataContext";
-import { SymbolDetail } from "./SymbolDetail";
+import { getParamString, namespacePath, useData } from "./DataContext";
+import { isFunction, SymbolDetail } from "./SymbolDetail";
 import { computeMemberLocalId } from "../share/symbol_id";
 import type {
   SymbolEntry,
@@ -103,6 +103,13 @@ export function SymbolDetailPage() {
       .map((th, i) => `${" ".repeat(i * 2)}template <${th}>\n`)
       .join("") + prefix;
 
+  let postfix = "";
+  if ("templateArgs" in current && current.templateArgs) {
+    postfix = `<${current.templateArgs.join(", ")}>`;
+  } else if (isFunction(current)) {
+    postfix = getParamString(current);
+  }
+
   return (
     <div className="detail-page">
       <Breadcrumb chain={chain} />
@@ -127,6 +134,7 @@ export function SymbolDetailPage() {
         headers={entry.headers}
         key={tail.id}
         prefix={prefix}
+        postfix={postfix}
         onMemberClick={handleMemberClick}
       />
     </div>

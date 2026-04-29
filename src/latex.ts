@@ -2,7 +2,6 @@ import { Glob } from "bun";
 import { join, resolve } from "node:path";
 import { Codeblock, Header } from "./share/types";
 
-
 const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
 
 const PATCHES: Record<string, [string, string][]> = {
@@ -105,7 +104,7 @@ const REQUIRED_MISSING_INCLUDES: Record<string, string[]> = {
   filesystem: ["ranges"],
   span: ["ranges"],
   optional: ["ranges"],
-  // containers, fs::path, and chrono, etc. uses std::formatter specializations, but its name 
+  // containers, fs::path, and chrono, etc. uses std::formatter specializations, but its name
   // is unqualified so we don't care now. maybe we can fix that in the future if needed
 };
 
@@ -150,9 +149,7 @@ export async function loadAllTexFiles(): Promise<Map<string, string>> {
   );
 }
 
-export function extractHeaderSynopses(
-  texFiles: Map<string, string>,
-): Header[] {
+export function extractHeaderSynopses(texFiles: Map<string, string>): Header[] {
   const results: Header[] = [];
   for (const [fileName, content] of texFiles) {
     results.push(...new LaTeXFile(fileName, content).extract());
@@ -205,10 +202,15 @@ class LaTeXFile {
       if (headerName === null) {
         break;
       }
+      if (results.find((h) => h.headerName === headerName)) {
+        throw new Error(
+          `Duplicate header marker for <${headerName}> in ${this.filename}`,
+        );
+      }
       this.advLine();
       let header: Header | null = null;
       while (true) {
-        const code = this.findNextCodeblockInThisHeader();
+        const code = this.findNextCodeblockInThisHeader(headerName);
         if (code === null) {
           if (header) {
             results.push(header);
@@ -265,10 +267,13 @@ class LaTeXFile {
     return `${missingIncludes.map((inc) => `#include <${inc}>`).join("\n")}\n${code}`;
   }
 
-  private findNextCodeblockInThisHeader(): string | null {
+  private findNextCodeblockInThisHeader(
+    currentHeaderName: string,
+  ): string | null {
     let codeblockStartLine: number | null = null;
     for (; this.lineIdx < this.lines.length; this.advLine()) {
-      if (isHeaderMarker(this.line)) {
+      const newHeaderName = isHeaderMarker(this.line);
+      if (newHeaderName && newHeaderName !== currentHeaderName) {
         if (codeblockStartLine !== null) {
           throw new Error(
             `Unclosed codeblock starting at ${this.filename}:${this.lineIdx + 1}`,

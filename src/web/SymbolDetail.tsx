@@ -19,6 +19,7 @@ import { type FlatSymbol, namespacePath } from "./DataContext";
 interface SymbolDetailProps extends FlatSymbol {
   onMemberClick?: (symbolId: string) => void;
   prefix?: string;
+  postfix?: string;
 }
 
 function isTemplate(kind: SymbolKind): boolean {
@@ -82,9 +83,7 @@ function ParamTable({
         {params.map((p, i) =>
           typeof p === "string" ? (
             <tr key={i}>
-              <td className="dim">
-                {p}
-              </td>
+              <td className="dim">{p}</td>
             </tr>
           ) : (
             <tr key={i}>
@@ -133,7 +132,6 @@ function MembersSection({
               fs={{ symbol: m, key: symbolId, headers }}
               selected={selectedMemberId === symbolId}
               onClick={() => onMemberClick?.(symbolId)}
-              compact
             />
           );
         })}
@@ -146,9 +144,9 @@ export function SymbolDetail({
   symbol,
   headers,
   prefix,
+  postfix,
   onMemberClick,
 }: SymbolDetailProps) {
-  const ns = namespacePath(symbol.namespace);
   const badge = getKindBadge(symbol);
 
   const showTemplate = isTemplate(symbol.kind) && "templateParams" in symbol;
@@ -165,7 +163,12 @@ export function SymbolDetail({
       <div className="symbol-detail-header">
         <div className="symbol-detail-name">
           {prefix && <div className="symbol-detail-prefix">{prefix}</div>}
-          <SymbolName name={symbol.name} />
+          <span>
+            <SymbolName name={symbol.name} />
+            {postfix && (
+              <span className="symbol-detail-postfix">{postfix}</span>
+            )}
+          </span>
         </div>
         <div className="symbol-detail-badges">
           {headers.map((header) => (

@@ -1,5 +1,10 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import type { IndexOutput, NamespaceInfo, SymbolEntry } from "../share/types";
+import type {
+  IndexOutput,
+  NamespaceInfo,
+  Parameter,
+  SymbolEntry,
+} from "../share/types";
 import { computeSymbolId } from "../share/symbol_id";
 
 const API_URL = "/std-index.json";
@@ -25,6 +30,14 @@ const overloadSetSize = new Map<string, number>();
 
 export function namespacePath(ns: NamespaceInfo[]): string {
   return ns.map((n) => n.name ?? "⟨anonymous⟩").join("::");
+}
+
+export function getParamString(
+  symbol: Extract<SymbolEntry, { parameters: Parameter[] }>,
+): string {
+  return `(${symbol.parameters.map((p) => `${p.type}${p.pack ? "..." : ""}`).join(", ")}${
+    "variadic" in symbol && symbol.variadic ? "..." : ""
+  })${"cvRef" in symbol && symbol.cvRef ? " " + symbol.cvRef : ""}`;
 }
 
 const getScopedName = (sym: SymbolEntry): string => {

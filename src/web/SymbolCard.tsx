@@ -1,5 +1,10 @@
 import type { SymbolEntry, SymbolKind, NamespaceInfo } from "../share/types";
-import { hasOverloads, namespacePath, type FlatSymbol } from "./DataContext";
+import {
+  getParamString,
+  hasOverloads,
+  namespacePath,
+  type FlatSymbol,
+} from "./DataContext";
 import { isFunction } from "./SymbolDetail";
 import { SymbolName } from "./SymbolName";
 
@@ -18,43 +23,21 @@ interface BadgeInfo {
 
 export function getKindBadge(entry: SymbolEntry): BadgeInfo {
   const kind = entry.kind;
-  if (kind === "class" && entry && "classKey" in entry) {
-    return { className: `badge-${entry.classKey}`, text: entry.classKey };
+  let descriptiveName = "";
+  if ("classKey" in entry) {
+    descriptiveName = entry.classKey;
   }
-  if (kind === "classTemplate" && entry && "classKey" in entry) {
-    return {
-      className: `badge-${entry.classKey}`,
-      text: `${entry.classKey} template`,
-      shortText: `${entry.classKey} tmpl.`,
-    };
-  }
-  if (kind === "classFullSpecialization" && entry && "classKey" in entry) {
-    return {
-      className: `badge-${entry.classKey}`,
-      text: `${entry.classKey} specialization`,
-      shortText: `${entry.classKey} spec.`,
-    };
-  }
-  if (kind === "classPartialSpecialization" && entry && "classKey" in entry) {
-    return {
-      className: `badge-${entry.classKey}`,
-      text: `${entry.classKey} partial specialization`,
-      shortText: `${entry.classKey} partial spec.`,
-    };
-  }
-  if ("ctor" in entry && entry.ctor) {
-    return { className: "badge-function", text: "constructor" };
-  }
-  if ("dtor" in entry && entry.dtor) {
-    return { className: "badge-function", text: "destructor" };
+  if ("constexpr" in entry && "type" in entry) {
+    descriptiveName = entry.constexpr ? "constant" : "variable";
   }
 
-  const map: Record<string, BadgeInfo> = {
+  const map: Record<SymbolKind, BadgeInfo> = {
     union: { className: "badge-union", text: "union" },
     enum: { className: "badge-enum", text: "enum" },
     typeAlias: { className: "badge-typeAlias", text: "type alias" },
-    variable: { className: "badge-variable", text: "variable" },
+    variable: { className: "badge-variable", text: descriptiveName },
     function: { className: "badge-function", text: "function" },
+    class: { className: "badge-class", text: descriptiveName },
     friendType: {
       className: "badge-friend",
       text: "friend type declaration",
@@ -91,11 +74,6 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
       text: "function template",
       shortText: "function tmpl.",
     },
-    variableTemplate: {
-      className: "badge-variable",
-      text: "variable template",
-      shortText: "variable tmpl.",
-    },
     concept: { className: "badge-concept", text: "concept" },
     deductionGuideTemplate: {
       className: "badge-deduction",
@@ -107,15 +85,35 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
       text: "function full specialization",
       shortText: "function spec.",
     },
-    variableFullSpecialization: {
+    variableTemplate: {
       className: "badge-variable",
-      text: "variable full specialization",
-      shortText: "variable spec.",
+      text: `${descriptiveName} template`,
+      shortText: `${descriptiveName} tmpl.`,
     },
     variablePartialSpecialization: {
       className: "badge-variable",
-      text: "variable partial specialization",
-      shortText: "variable partial spec.",
+      text: `${descriptiveName} partial specialization`,
+      shortText: `${descriptiveName} partial spec.`,
+    },
+    variableFullSpecialization: {
+      className: "badge-variable",
+      text: `${descriptiveName} full specialization`,
+      shortText: `${descriptiveName} full spec.`,
+    },
+    classTemplate: {
+      className: "badge-class",
+      text: `${descriptiveName} template`,
+      shortText: `${descriptiveName} tmpl.`,
+    },
+    classPartialSpecialization: {
+      className: "badge-class",
+      text: `${descriptiveName} partial specialization`,
+      shortText: `${descriptiveName} partial spec.`,
+    },
+    classFullSpecialization: {
+      className: "badge-class",
+      text: `${descriptiveName} full specialization`,
+      shortText: `${descriptiveName} full spec.`,
     },
     macro: { className: "badge-macro", text: "macro" },
     functionLikeMacro: {
@@ -139,9 +137,7 @@ export function SymbolCard({
 
   let paramInfo: string | null = null;
   if (isFunction(fs.symbol) && (!ns || hasOverloads(fs.symbol))) {
-    paramInfo = `(${fs.symbol.parameters.map((p) => `${p.type}${p.pack ? "..." : ""}`).join(", ")}${
-      fs.symbol.variadic ? "..." : ""
-    }) ${fs.symbol.cvRef}`;
+    paramInfo = getParamString(fs.symbol);
   }
   if ("templateArgs" in fs.symbol && fs.symbol.templateArgs) {
     paramInfo = `<${fs.symbol.templateArgs.join(", ")}>`;
@@ -153,20 +149,23 @@ export function SymbolCard({
       onClick={onClick}
     >
       <div className="symbol-card-aux">
+        {(fs.symbol.access === "private" ||
+          fs.symbol.access === "protected") && (
+          <span className={`badge badge-access`}>{fs.symbol.access}</span>
+        )}
         {isFunction(fs.symbol) && fs.symbol.virtual && (
           <span className="badge badge-virtual">virtual</span>
         )}
         {isFunction(fs.symbol) && fs.symbol.friend && (
           <span className="badge badge-friend">friend</span>
         )}
-        {(fs.symbol.access === "private" ||
-          fs.symbol.access === "protected") && (
-          <span className={`badge badge-access`}>{fs.symbol.access}</span>
+        {fs.symbol.access && "static" in fs.symbol && fs.symbol.static && (
+          <span className="badge badge-static">static</span>
         )}
         <span className={`badge ${badge.className}`}>
           {badge.shortText || badge.text}
         </span>
-        {!compact && fs.headers[0] && (
+        {ns && fs.headers[0] && (
           <span className="symbol-card-header">&lt;{fs.headers[0]}&gt;</span>
         )}
       </div>

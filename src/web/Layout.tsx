@@ -122,6 +122,7 @@ function SidebarContent({
         fs={fs}
         selected={currentSymbolId === fs.key}
         onClick={() => onNavigate(fs)}
+        compact
       />
     );
   });
