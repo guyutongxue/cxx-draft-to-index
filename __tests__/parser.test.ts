@@ -101,3 +101,42 @@ void foo(int t = sizeof...(Args));
     parameters: [{ type: "int", name: "t", defaultArg: "sizeof...(Args)" }],
   });
 });
+
+test("friend type declaration", () => {
+  const code = String.raw`
+class A {};
+class B {};
+class C {};
+template <typename... Ts>
+class D {
+  friend class A, B;
+  friend Ts..., class C;
+};
+`;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  expect(symbols[3]).toMatchObject({
+    kind: "classTemplate",
+    name: "D",
+    members: [
+      {
+        kind: "friendType",
+        targetType: "A",
+      },
+      {
+        kind: "friendType",
+        targetType: "B",
+      },
+      {
+        kind: "friendType",
+        targetType: "Ts",
+        expand: true,
+      },
+      {
+        kind: "friendType",
+        targetType: "C",
+      },
+    ],
+  });
+});

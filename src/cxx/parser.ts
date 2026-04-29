@@ -164,6 +164,7 @@ interface BaseSpecifierInfo {
   access: AccessSpecifier | null;
   virtual: boolean;
   typeId: IdExpressionInfo;
+  expand: boolean;
 }
 
 interface ClassSpecifierInfo {
@@ -230,6 +231,8 @@ type SpecialFunctionBody = "pure" | "defaulted" | "deleted";
 interface DeclaratorListInfo {
   declarators: InitDeclaratorInfo[];
   kind: "simple" | "functionDefinition" | "friendType" | "deductionGuide";
+  // only present when kind is "friendType"
+  friendTypes: SymbolEntry[];
   specialFunctionBody: SpecialFunctionBody | null;
 }
 
@@ -630,13 +633,16 @@ export class Parser {
       contextType,
     });
     if (declSpecifier.classSpecifier?.useKind === "friendType") {
-      this.unimplemented("friend type declaration");
+      return this.parseFriendTypeDeclaration({ declSpecifier, access });
     }
 
     let declaratorList: DeclaratorListInfo | null = null;
 
     if (!this.isP(";")) {
-      declaratorList = this.parseDeclaratorList({ declSpecifier });
+      declaratorList = this.parseDeclaratorList({ declSpecifier, access });
+    }
+    if (declaratorList?.kind === "friendType") {
+      return declaratorList.friendTypes;
     }
     if (declaratorList?.kind !== "functionDefinition") {
       this.consumeP(";");
@@ -650,6 +656,7 @@ export class Parser {
           (classSpecifier.tagKind === "struct" ? "public" : "private"),
         virtual: b.virtual,
         name: b.typeId.name,
+        expand: b.expand,
       })) ?? [];
     if (
       classSpecifier?.id &&
@@ -1133,20 +1140,28 @@ export class Parser {
 
   private parseDeclaratorList({
     declSpecifier,
+    access,
   }: {
     declSpecifier: DeclarationSpecifierInfo;
+    access: AccessSpecifier | null;
   }): DeclaratorListInfo {
     let declarators: InitDeclaratorInfo[] = [];
     let kind: DeclaratorListInfo["kind"] = "simple";
     let specialFunctionBody: SpecialFunctionBody | null = null;
     outermost: while (true) {
-      // friend class A, class B;
-      // friend class Ts...;
+      // friend A, B;
+      // friend Ts...;
       if (
         declSpecifier.declSpecifiers[0] === "friend" &&
         (this.isP(",") || this.isP("..."))
       ) {
-        this.unimplemented("rest friend-types");
+        const friendTypes = this.parseFriendTypeDeclaration({ declSpecifier, access });
+        return {
+          declarators: [],
+          kind: "friendType",
+          specialFunctionBody: null,
+          friendTypes,
+        }
       }
       const declarator = this.parseDeclarator({
         declSpecifier,
@@ -1234,7 +1249,7 @@ export class Parser {
       }
       this.consumeP(",");
     }
-    return { declarators, kind, specialFunctionBody };
+    return { declarators, kind, specialFunctionBody, friendTypes: [] };
   }
 
   private buildTypeInfo(
@@ -1955,19 +1970,22 @@ export class Parser {
         }
         const baseTypeId = this.readIdExpression(); // class-or-decltype
         const raw = this.lexer.range(startLoc, this.tok.loc);
+        let expand = false;
+        if (this.isP("...")) {
+          this.consumeP("...");
+          expand = true;
+        }
         baseSpecifiers.push({
           raw,
           access: accessSpecifier,
           virtual,
           typeId: baseTypeId,
+          expand,
         });
         if (!this.isP(",")) {
           break;
         }
         this.consumeP(",");
-      }
-      if (this.isP("...")) {
-        this.consumeP("...");
       }
     }
 
@@ -2011,9 +2029,6 @@ export class Parser {
     };
   }
 
-  /**
-   * Parse
-   */
   private parseMemberSpecification(
     initialAccess: AccessSpecifier,
     scopeClassName: string | null,
@@ -2059,6 +2074,61 @@ export class Parser {
     }
     this.consumeP("}");
     return members;
+  }
+
+  private parseFriendTypeDeclaration({
+    declSpecifier,
+    access,
+  }: {
+    declSpecifier: DeclarationSpecifierInfo;
+    access: AccessSpecifier | null;
+  }): SymbolEntry[] {
+    const result: SymbolEntry[] = [];
+    let firstExpand = false;
+    if (this.isP("...")) {
+      this.consumeP("...");
+      firstExpand = true;
+    }
+    // first friend declaration was parsed as typeSpecifier in declaration specifiers
+    result.push(this.buildSymbol("friendType", {
+      name: "", // friend type declartion do not introduce name, sames below
+      raw: declSpecifier.raw + ";",
+      access,
+      expand: firstExpand,
+      targetType: declSpecifier.typeString,
+    }))
+    if (this.isP(";")) {
+      return result;
+    }
+    this.consumeP(",");
+    while (true) {
+      const startLoc = this.tok.loc;
+      if (this.isId("typename")) {
+        this.consumeId("typename");
+      } else if (this.isId("class") || this.isId("struct") || this.isId("union")) {
+        // elaborated type specifier
+        this.adv();
+      }
+      const idExpr = this.readIdExpression();
+      const raw = this.lexer.range(startLoc, this.tok.loc);
+      let expand = false;
+      if (this.isP("...")) {
+        this.consumeP("...");
+        expand = true;
+      }
+      result.push(this.buildSymbol("friendType", {
+        name: "",
+        raw: declSpecifier.raw + " " + raw + (expand ? "..." : "") + ";",
+        access,
+        expand,
+        targetType: idExpr.name,
+      }));
+      if (this.isP(";")) {
+        break;
+      }
+      this.consumeP(",");
+    }
+    return result;
   }
 
   // MARK: ---- Function ----
@@ -3036,7 +3106,7 @@ export class Parser {
         header: this.filename,
         namespace: [...this.context.nsStack],
         languageLinkage: this.context.linkageStack.at(-1) ?? null,
-      } as SymbolEntry,
+      } as any,
       (x) => typeof x === "undefined",
     ) as ExtractKind<SymbolEntry, Kind>;
     if (this.context.scopeState === "namespace") {

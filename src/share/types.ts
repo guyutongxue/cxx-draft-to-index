@@ -41,6 +41,7 @@ export interface Base {
   access: "public" | "protected" | "private";
   virtual: boolean;
   name: string;
+  expand: boolean;
 }
 
 export interface ClassSymbolEntry extends SymbolEntryBase {
@@ -108,6 +109,8 @@ export interface FunctionSymbolEntry extends SymbolEntryBase {
 
 export interface FriendTypeSymbolEntry extends SymbolEntryBase {
   kind: "friendType";
+  targetType: string;
+  expand: boolean;
 }
 
 // using std::foo;
