@@ -2750,11 +2750,13 @@ export class Parser {
           // - otherwise the syntax should be
           //   `template <typename T> Foo::C<T>::Bar`
           if (parts.length === 1) {
-            // The head param count must not exceed the primary template's param
-            // count.  An exact match covers primary-template redeclarations; a
-            // smaller count (including 0 for template<>) covers full/partial
-            // specializations that introduce a new declaration without a prior
-            // forward declaration.
+            // Require exactly one template head whose parameter count does not
+            // exceed the primary template's parameter count.
+            // - Exact match: primary-template redeclaration (e.g. template<T>
+            //   redeclaring template<T> class C).
+            // - Smaller count (including 0 for template<>): full or partial
+            //   specialization that introduces a new declaration without a
+            //   prior forward declaration of the same specialization.
             return (
               currentTemplateHeads.length === 1 &&
               currentTemplateHeads[0].templateParameters.length <=
@@ -3209,6 +3211,8 @@ export class Parser {
         // Temporarily install the correct namespace (taken from the forward
         // declaration / primary template we just looked up) so that buildSymbol
         // stamps the right namespace on the new symbol.
+        // SymbolEntryBase.namespace is NamespaceInfo[] (never null), so the
+        // cast to Draft<NamespaceInfo[]> is always safe.
         const savedNsStack = this.context.nsStack;
         this.context = produce(this.context, (ctx) => {
           ctx.nsStack = forwardDeclSymbol.namespace as Draft<NamespaceInfo[]>;
