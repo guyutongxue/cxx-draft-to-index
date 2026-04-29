@@ -5,7 +5,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { getParamString, namespacePath, useData } from "./DataContext";
-import { isFunction, SymbolDetail } from "./SymbolDetail";
+import { hasParameters, isFunction, SymbolDetail } from "./SymbolDetail";
 import { computeMemberLocalId } from "../share/symbol_id";
 import type {
   SymbolEntry,
@@ -106,7 +106,7 @@ export function SymbolDetailPage() {
   let postfix = "";
   if ("templateArgs" in current && current.templateArgs) {
     postfix = `<${current.templateArgs.join(", ")}>`;
-  } else if (isFunction(current)) {
+  } else if (hasParameters(current)) {
     postfix = getParamString(current);
   }
 

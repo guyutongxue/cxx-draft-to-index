@@ -5,7 +5,7 @@ import {
   namespacePath,
   type FlatSymbol,
 } from "./DataContext";
-import { isFunction } from "./SymbolDetail";
+import { hasParameters, isFunction } from "./SymbolDetail";
 import { SymbolName } from "./SymbolName";
 
 export interface SymbolCardProps {
@@ -152,7 +152,7 @@ export function SymbolCard({
   const badge = getKindBadge(fs.symbol);
 
   let paramInfo: string | null = null;
-  if (isFunction(fs.symbol) && (!ns || hasOverloads(fs.symbol))) {
+  if (hasParameters(fs.symbol) && (!ns || hasOverloads(fs.symbol))) {
     paramInfo = getParamString(fs.symbol);
   }
   if ("templateArgs" in fs.symbol && fs.symbol.templateArgs) {

@@ -852,6 +852,7 @@ export class Parser {
                 targetType: declarator.function.trailingReturnType,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
+                signatureRequires: declarator.function.constraint?.raw || null,
                 variadic: declarator.function.variadic,
                 access,
               }),
@@ -864,6 +865,7 @@ export class Parser {
                 parameters,
                 targetType: declarator.function.trailingReturnType,
                 variadic: declarator.function.variadic,
+                signatureRequires: null,
                 access,
               }),
             );

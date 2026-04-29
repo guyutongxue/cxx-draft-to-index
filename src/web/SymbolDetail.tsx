@@ -10,6 +10,11 @@ import type {
   NamespaceInfo,
   Parameter,
   TemplateParameter,
+  FunctionTemplateSymbolEntry,
+  FunctionFullSpecializationSymbolEntry,
+  ClassTemplateSymbolEntry,
+  ClassFullSpecializationSymbolEntry,
+  ClassPartialSpecializationSymbolEntry,
 } from "../share/types";
 import { getKindBadge, SymbolCard } from "./SymbolCard";
 import { SymbolName } from "./SymbolName";
@@ -34,7 +39,14 @@ function isSpecialization(kind: SymbolKind): boolean {
   );
 }
 
-function hasMembers(s: SymbolEntry): s is ClassSymbolEntry | UnionSymbolEntry {
+function hasMembers(
+  s: SymbolEntry,
+): s is
+  | ClassSymbolEntry
+  | UnionSymbolEntry
+  | ClassTemplateSymbolEntry
+  | ClassFullSpecializationSymbolEntry
+  | ClassPartialSpecializationSymbolEntry {
   return (
     (s.kind === "class" ||
       s.kind === "union" ||
@@ -49,12 +61,23 @@ function hasEnumerators(s: SymbolEntry): s is EnumSymbolEntry {
   return s.kind === "enum";
 }
 
-export function isFunction(s: SymbolEntry): s is FunctionSymbolEntry {
+export function isFunction(
+  s: SymbolEntry,
+): s is
+  | FunctionSymbolEntry
+  | FunctionTemplateSymbolEntry
+  | FunctionFullSpecializationSymbolEntry {
   return (
     s.kind === "function" ||
     s.kind === "functionTemplate" ||
     s.kind === "functionFullSpecialization"
   );
+}
+
+export function hasParameters(
+  s: SymbolEntry,
+): s is Extract<SymbolEntry, { parameters: Parameter[]; variadic: boolean }> {
+  return "parameters" in s && "variadic" in s;
 }
 
 function isVariable(s: SymbolEntry): s is VariableSymbolEntry {
@@ -248,10 +271,10 @@ export function SymbolDetail({
         </div>
       )}
 
-      {showFunction && isFunction(symbol) && (
+      {hasParameters(symbol) && (
         <div className="symbol-detail-section">
           <div className="symbol-detail-section-title">Signature</div>
-          {symbol.returnType && (
+          {"returnType" in symbol && symbol.returnType && (
             <div className="meta-grid">
               <span className="meta-label">Return type</span>
               <span className="meta-value">{symbol.returnType}</span>
@@ -271,7 +294,7 @@ export function SymbolDetail({
         </div>
       )}
 
-      {showVariable && isVariable(symbol) && (
+      {showVariable && (
         <div className="symbol-detail-section">
           <div className="symbol-detail-section-title">Type</div>
           <code className="meta-value">{symbol.type}</code>
@@ -279,7 +302,6 @@ export function SymbolDetail({
       )}
 
       {"base" in symbol &&
-        Array.isArray(symbol.base) &&
         symbol.base.length > 0 && (
           <div className="symbol-detail-section">
             <div className="symbol-detail-section-title">Base Classes</div>

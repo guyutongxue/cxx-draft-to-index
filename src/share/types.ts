@@ -139,6 +139,7 @@ export interface DeductionGuideSymbolEntry extends SymbolEntryBase {
   parameters: Parameter[];
   variadic: boolean;
   targetType: string;
+  signatureRequires: string | null;
 }
 
 export interface Template {
