@@ -1989,7 +1989,7 @@ export class Parser {
       const componentName = idExpr?.parts.at(-1)?.value ?? null;
       using memberScope = this.enterMemberScope();
       members = this.parseMemberSpecification(
-        contextType === DeclarationContextType.Class ? "public" : "private",
+        tagKind === "class" ? "private" : "public",
         componentName,
       );
       useKind = "definition";
