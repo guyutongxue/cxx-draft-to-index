@@ -72,6 +72,10 @@ function mergeSingleSymbol<T extends SymbolEntry>(
     exists.enumerators ??= incoming.enumerators;
   }
 
+  if ("base" in exists && exists.base.length === 0 && "base" in incoming) {
+    exists.base = incoming.base;
+  }
+
   if ("members" in exists && "members" in incoming) {
     exists.members = mergeSymbolsImpl([
       ...(exists.members ?? []),
