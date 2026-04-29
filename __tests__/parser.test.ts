@@ -39,6 +39,79 @@ struct N::S<int> {};
   });
 });
 
+test("full specialization of namespace-scoped class without forward declaration", () => {
+  const code = `
+namespace N {
+  template<typename T>
+  struct S {};
+}
+
+template<>
+struct N::S<int> {};
+    `;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  expect(symbols[1]).toMatchObject({
+    kind: "classFullSpecialization",
+    name: "S",
+    namespace: [{ name: "N" }],
+    templateArgs: ["int"],
+  });
+});
+
+test("full specialization of class-member class without forward declaration", () => {
+  const code = `
+class Outer {
+  template<typename T>
+  struct Inner {};
+};
+
+template<>
+struct Outer::Inner<int> {};
+    `;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  expect(symbols[1]).toMatchObject({
+    kind: "class",
+    name: "Outer",
+    members: [
+      {
+        kind: "classFullSpecialization",
+        name: "Inner",
+        templateArgs: ["int"],
+      },
+    ],
+  });
+});
+
+test("partial specialization of class-member class without forward declaration", () => {
+  const code = `
+class Outer {
+  template<typename T, typename U>
+  struct Inner {};
+};
+
+template<typename T>
+struct Outer::Inner<T, int> {};
+    `;
+  const lexer = new Lexer(code);
+  const parser = new Parser(lexer, "<input>");
+  const symbols = parser.parseTopLevel();
+  expect(symbols[1]).toMatchObject({
+    kind: "class",
+    name: "Outer",
+    members: [
+      {
+        kind: "classPartialSpecialization",
+        name: "Inner",
+        templateArgs: ["T", "int"],
+      },
+    ],
+  });
+});
+
 test("complex declarator", () => {
   const code = `
 volatile int (*const ptrArr)[42];

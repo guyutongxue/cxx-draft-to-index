@@ -2750,9 +2750,14 @@ export class Parser {
           // - otherwise the syntax should be
           //   `template <typename T> Foo::C<T>::Bar`
           if (parts.length === 1) {
+            // The head param count must not exceed the primary template's param
+            // count.  An exact match covers primary-template redeclarations; a
+            // smaller count (including 0 for template<>) covers full/partial
+            // specializations that introduce a new declaration without a prior
+            // forward declaration.
             return (
               currentTemplateHeads.length === 1 &&
-              currentTemplateHeads[0].templateParameters.length ===
+              currentTemplateHeads[0].templateParameters.length <=
                 sym2.templateParams.length
             );
           } else {
@@ -3182,36 +3187,58 @@ export class Parser {
           `Cannot find parent symbol for nested class declaration: ${id.name}`,
         );
       }
-      let currentSymbol: SymbolEntry & { members: ClassMemberEntry[] | null };
-      {
-        using enterMemberScope = this.enterMemberScope();
-        const name = idExprWithoutTemplateArgs.parts.at(-1)!.name;
-        currentSymbol = this.buildSymbol(
-          forwardDeclSymbol.kind as "class",
-          {
-            name,
-            templateParams:
-              "templateParams" in forwardDeclSymbol && templateInfo
-                ? this.buildTemplateParams(templateInfo)
-                : void 0,
-            templateRequires:
-              "templateRequires" in forwardDeclSymbol && templateInfo
-                ? templateInfo.requiresClause
-                : void 0,
-            ...info,
-          } as any,
-        );
+      const name = idExprWithoutTemplateArgs.parts.at(-1)!.value!;
+      // Build with the kind supplied by the caller and derive templateParams
+      // from templateInfo rather than from the forward declaration, since the
+      // forward declaration may be a different specialization (or the primary
+      // template when there is no prior forward declaration at all).
+      const buildInfo = {
+        name,
+        templateParams:
+          templateInfo && !templateInfo.fullSpecialization
+            ? this.buildTemplateParams(templateInfo)
+            : void 0,
+        templateRequires:
+          templateInfo && !templateInfo.fullSpecialization
+            ? templateInfo.requiresClause
+            : void 0,
+        ...info,
+      } as any;
+      if (scopeSymbols.length === 0) {
+        // The qualified name resolves through a namespace, not a class scope.
+        // Temporarily install the correct namespace (taken from the forward
+        // declaration / primary template we just looked up) so that buildSymbol
+        // stamps the right namespace on the new symbol.
+        const savedNsStack = this.context.nsStack;
+        this.context = produce(this.context, (ctx) => {
+          ctx.nsStack = forwardDeclSymbol.namespace as Draft<NamespaceInfo[]>;
+        });
+        const result = this.buildSymbol(kind, buildInfo);
+        this.context = produce(this.context, (ctx) => {
+          ctx.nsStack = savedNsStack as Draft<NamespaceInfo[]>;
+        });
+        return result;
+      } else {
+        // The qualified name resolves through one or more enclosing class
+        // scopes.  Build the innermost symbol inside enterMemberScope (so it
+        // doesn't auto-push to builtSymbols), then re-wrap it in each
+        // enclosing class shell and push the whole thing manually.
+        let currentSymbol: SymbolEntry & { members: ClassMemberEntry[] | null };
+        {
+          using enterMemberScope = this.enterMemberScope();
+          currentSymbol = this.buildSymbol(kind, buildInfo);
+        }
+        for (const memberSym of scopeSymbols) {
+          currentSymbol = {
+            ...(memberSym as any),
+            members: [currentSymbol as ClassMemberEntry],
+          };
+        }
+        this.context = produce(this.context, (ctx) => {
+          ctx.builtSymbols.push(currentSymbol);
+        });
+        return currentSymbol;
       }
-      for (const memberSym of scopeSymbols) {
-        currentSymbol = {
-          ...(memberSym as any),
-          members: [currentSymbol as ClassMemberEntry],
-        };
-      }
-      this.context = produce(this.context, (ctx) => {
-        ctx.builtSymbols.push(currentSymbol);
-      });
-      return currentSymbol;
     }
   }
 }
