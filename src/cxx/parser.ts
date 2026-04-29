@@ -757,7 +757,10 @@ export class Parser {
         (!inline && this.context.linkageStack.length > 0);
       this.assert(declarator.idExpr, `Declarator must have an id-expression`);
       if (declSpecifier.declSpecifiers.includes("typedef")) {
-        this.assert(!constexpr && !static_ && !inline && !extern, "typedef cannot be constexpr/static/inline/extern");
+        this.assert(
+          !constexpr && !static_ && !inline && !extern,
+          "typedef cannot be constexpr/static/inline/extern",
+        );
         this.assert(!templateInfo, "typedef cannot be a template");
         symbols.push(
           this.buildSymbol("typeAlias", {
@@ -766,7 +769,7 @@ export class Parser {
             type: declarator.typeInfo,
             raw: declSpecifier.raw + " " + declarator.raw + ";",
             access: null,
-          })
+          }),
         );
       }
 
@@ -849,6 +852,7 @@ export class Parser {
                 targetType: declarator.function.trailingReturnType,
                 templateParams: this.buildTemplateParams(templateInfo),
                 templateRequires: templateInfo.requiresClause,
+                variadic: declarator.function.variadic,
                 access,
               }),
             );
@@ -859,6 +863,7 @@ export class Parser {
                 raw: this.lexer.range(startLoc, this.tok.loc),
                 parameters,
                 targetType: declarator.function.trailingReturnType,
+                variadic: declarator.function.variadic,
                 access,
               }),
             );

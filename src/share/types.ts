@@ -137,6 +137,7 @@ export interface NamespaceAliasSymbolEntry extends SymbolEntryBase {
 export interface DeductionGuideSymbolEntry extends SymbolEntryBase {
   kind: "deductionGuide";
   parameters: Parameter[];
+  variadic: boolean;
   targetType: string;
 }
 

@@ -33,10 +33,10 @@ export function namespacePath(ns: NamespaceInfo[]): string {
 }
 
 export function getParamString(
-  symbol: Extract<SymbolEntry, { parameters: Parameter[] }>,
+  symbol: Extract<SymbolEntry, { parameters: Parameter[]; variadic: boolean }>,
 ): string {
   return `(${symbol.parameters.map((p) => `${p.type}${p.pack ? "..." : ""}`).join(", ")}${
-    "variadic" in symbol && symbol.variadic ? "..." : ""
+    symbol.variadic ? "..." : ""
   })${"cvRef" in symbol && symbol.cvRef ? " " + symbol.cvRef : ""}`;
 }
 
