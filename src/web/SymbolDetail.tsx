@@ -15,6 +15,7 @@ import { getKindBadge, SymbolCard } from "./SymbolCard";
 import { SymbolName } from "./SymbolName";
 import { computeMemberLocalId } from "../share/symbol_id";
 import { type FlatSymbol, namespacePath } from "./DataContext";
+import { Fragment } from "react/jsx-runtime";
 
 interface SymbolDetailProps extends FlatSymbol {
   onMemberClick?: (symbolId: string) => void;
@@ -240,9 +241,10 @@ export function SymbolDetail({
           </div>
           <div className="meta-grid">
             {symbol.templateArgs.map((arg, i) => (
-              <div key={i} className="meta-value">
-                {arg}
-              </div>
+              <Fragment key={i}>
+                <div className="meta-label" />
+                <div className="meta-value">{arg}</div>
+              </Fragment>
             ))}
           </div>
         </div>
@@ -285,9 +287,17 @@ export function SymbolDetail({
             <div className="symbol-detail-section-title">Base Classes</div>
             <div className="meta-grid">
               {symbol.base.map((b, i) => (
-                <div key={i} className="meta-value">
-                  {b.raw}
-                </div>
+                <Fragment key={i}>
+                  <div className="meta-label">
+                    {b.access}
+                  </div>
+                  <div className="meta-value">
+                    {b.name}
+                    {b.virtual && (
+                      <span className="badge badge-virtual">virtual</span>
+                    )}
+                  </div>
+                </Fragment>
               ))}
             </div>
           </div>

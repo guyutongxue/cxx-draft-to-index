@@ -414,8 +414,10 @@ body {
 }
 
 .meta-value {
+  display: flex;
   color: #c9d1d9;
   font-family: monospace;
+  gap: 6px;
 }
 
 .member-card {

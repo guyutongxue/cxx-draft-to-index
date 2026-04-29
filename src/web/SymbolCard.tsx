@@ -181,7 +181,7 @@ export function SymbolCard({
         <span className={`badge ${badge.className}`}>
           {badge.shortText || badge.text}
         </span>
-        {ns && fs.headers[0] && (
+        {!fs.symbol.access && fs.headers[0] && (
           <span className="symbol-card-header">&lt;{fs.headers[0]}&gt;</span>
         )}
       </div>
