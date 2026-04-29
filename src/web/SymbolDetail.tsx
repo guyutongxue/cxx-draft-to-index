@@ -162,15 +162,13 @@ export function SymbolDetail({
   return (
     <div className="symbol-detail-panel">
       <div className="symbol-detail-header">
-        <div className="symbol-detail-name">
-          {prefix && <div className="symbol-detail-prefix">{prefix}</div>}
-          <span>
+        <span className="symbol-detail-name-container">
+          {prefix && <span className="symbol-detail-prefix">{prefix}</span>}
+          <span className="symbol-detail-name">
             <SymbolName name={symbol.name} />
-            {postfix && (
-              <span className="symbol-detail-postfix">{postfix}</span>
-            )}
           </span>
-        </div>
+          {postfix && <span className="symbol-detail-postfix">{postfix}</span>}
+        </span>
         <div className="symbol-detail-badges">
           {headers.map((header) => (
             <span className="badge badge-tag" key={header}>
@@ -288,9 +286,7 @@ export function SymbolDetail({
             <div className="meta-grid">
               {symbol.base.map((b, i) => (
                 <Fragment key={i}>
-                  <div className="meta-label">
-                    {b.access}
-                  </div>
+                  <div className="meta-label">{b.access}</div>
                   <div className="meta-value">
                     {b.name}
                     {b.virtual && (
