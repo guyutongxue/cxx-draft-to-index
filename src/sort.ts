@@ -12,5 +12,12 @@ export function topologicalSort(
       depGraphEdges.push([header.headerName, include]);
     }
   }
+  for (const [from, to] of depGraphEdges) {
+    if (!depGraph.hasNode(to)) {
+      console.warn(`Header ${to} not found in graph nodes.`);
+      continue;
+    }
+    depGraph.addDependency(from, to);
+  }
   return depGraph.overallOrder().map((header) => depGraph.getNodeData(header));
 }

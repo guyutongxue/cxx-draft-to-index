@@ -784,14 +784,7 @@ export class Parser {
       const partialSpecialization = templateInfo && idLastPart.templateArgs;
       if (declarator.idExpr.parts.length !== 1) {
         if (partialSpecialization || templateInfo?.fullSpecialization) {
-          const idExprWithoutTemplateArg = this.removeTemplateArgsFromId(
-            declarator.idExpr,
-          );
-          this.lookupId(
-            idExprWithoutTemplateArg,
-            templateInfo,
-            "looking up specialization target",
-          );
+          // TODO: check main template's existence through symbol lookup
         } else {
           console.warn(
             `(Re-)declaration of a scoped function or variable (or corresponding template) is not supported: ${declarator.idExpr.name}`,
@@ -2685,14 +2678,11 @@ export class Parser {
 
   private lookupId(
     id: IdExpressionInfo,
-    templateInfo: TemplateInfo | null,
+    templateHeads: readonly PlainTemplateInfo[],
     failureHint?: string,
   ): Immutable<SymbolEntry>[] | null {
     const allSymbols = [...this.parsedSymbols, ...this.context.builtSymbols];
     const currentNs = id.fromGlobal ? [] : this.context.nsStack;
-    const templateHeads = templateInfo
-      ? [...templateInfo.nested, templateInfo]
-      : [];
     const result = this.lookupIdImpl(
       id.parts,
       templateHeads,
@@ -2714,12 +2704,6 @@ export class Parser {
     allSymbols: readonly Immutable<SymbolEntry>[],
   ): Immutable<SymbolEntry>[] | null {
     nextSymbol: for (const sym of allSymbols) {
-      if (
-        idParts[0]?.name.includes("lazy_split_view") &&
-        sym.name.includes("lazy_split_view")
-      ) {
-        debugger;
-      }
       const parts = [...idParts];
       const targetNamespace = [...sym.namespace];
       const currentNamespace = [...currentNs];
@@ -3190,7 +3174,7 @@ export class Parser {
       const [forwardDeclSymbol, ...scopeSymbols] =
         this.lookupId(
           idExprWithoutTemplateArgs,
-          templateInfo,
+          templateInfo ? [...templateInfo.nested, templateInfo] : [],
           `building nested symbol`,
         ) ?? [];
       if (!forwardDeclSymbol) {

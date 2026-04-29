@@ -166,7 +166,16 @@ function isClassDefinitionCodeblock(code: string): boolean {
 }
 
 function isHeaderMarker(line: string): string | null {
-  return line.match(/\\(?:indexheader|libheaderdef)\{([^}]+)\}/)?.[1] ?? null;
+  // indexheader & libheaderdef inject indices.
+  // But sometime the \libheaderdef was appeared after synopsis
+  // so we also tries to detect \rSec title
+  return (
+    line.match(/\\(?:indexheader|libheaderdef)\{([^}]+)\}/)?.[1] ??
+    line.match(
+      /\\rSec\d\[[^\]]+\]\{Header \\tcode\{<([^>]+)>\} synopsis\}/,
+    )?.[1] ??
+    null
+  );
 }
 
 class LaTeXFile {

@@ -25,7 +25,7 @@ async function main() {
     0,
   );
   console.log(
-    `Preprocessed ${preprocessed.length} codeblocks (${totalIncludes} #include directives found).\n`,
+    `Preprocessed ${preprocessed.length} headers (${totalIncludes} #include directives found).\n`,
   );
 
   const sortedHeaders = topologicalSort(preprocessed);

@@ -58,13 +58,13 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
           console.warn(`#include regex matching failed: ${resolved}`);
         }
       } else if (directiveName === "define") {
-        const match = rest.match(/^\s*(\w+)(?:\(([^)]*)\))?/);
+        const match = rest.match(/^\s*([^\s^(]+)(?:\(([^)]*)\))?\s*(.*)$/);
         if (!match) {
           console.warn(`#define regex matching failed: ${rest}`);
           continue;
         }
         const namespace: never[] = []; // macros should not have namespace
-        const [, name, parameterStr] = match;
+        const [, name, parameterStr, value] = match;
         if (parameterStr) {
           const parameters = parameterStr
             .split(",")
@@ -78,6 +78,8 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             raw,
             parameters,
             languageLinkage: null,
+            access: null,
+            definition: value,
           });
         } else {
           symbols.push({
@@ -87,6 +89,8 @@ export function preprocessCode(code: string, header: string): PreprocessResult {
             kind: "macro",
             raw,
             languageLinkage: null,
+            access: null,
+            definition: value,
           });
         }
       }
