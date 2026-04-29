@@ -1224,6 +1224,7 @@ export class Parser {
             }
           }
           kind = "functionDefinition";
+          declarators.push({ ...declarator, initializer: null });
           break outermost;
         }
       } else {
@@ -2108,6 +2109,7 @@ export class Parser {
       } else if (this.isId("class") || this.isId("struct") || this.isId("union")) {
         // elaborated type specifier
         this.adv();
+        this.tryParseAttribute();
       }
       const idExpr = this.readIdExpression();
       const raw = this.lexer.range(startLoc, this.tok.loc);
