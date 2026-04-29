@@ -30,13 +30,29 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
   if ("constexpr" in entry && "type" in entry) {
     descriptiveName = entry.constexpr ? "constant" : "variable";
   }
+  if ("ctor" in entry && entry.ctor) {
+    descriptiveName = "constructor";
+  } else if ("dtor" in entry && entry.dtor) {
+    descriptiveName = "destructor";
+  } else if ("operator" in entry && entry.operator) {
+    descriptiveName = entry.name.includes(`""`)
+      ? "udl"
+      : /\w/.test(entry.operator) &&
+          entry.operator !== "new" &&
+          entry.operator !== "delete"
+        ? "conversion"
+        : "operator";
+  }
 
   const map: Record<SymbolKind, BadgeInfo> = {
     union: { className: "badge-union", text: "union" },
     enum: { className: "badge-enum", text: "enum" },
     typeAlias: { className: "badge-typeAlias", text: "type alias" },
     variable: { className: "badge-variable", text: descriptiveName },
-    function: { className: "badge-function", text: "function" },
+    function: {
+      className: "badge-function",
+      text: descriptiveName || "function",
+    },
     class: { className: "badge-class", text: descriptiveName },
     friendType: {
       className: "badge-friend",
@@ -71,8 +87,8 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
     },
     functionTemplate: {
       className: "badge-function",
-      text: "function template",
-      shortText: "function tmpl.",
+      text: `${descriptiveName || "function"} template`,
+      shortText: `${descriptiveName || "function"} tmpl.`,
     },
     concept: { className: "badge-concept", text: "concept" },
     deductionGuideTemplate: {
@@ -82,8 +98,8 @@ export function getKindBadge(entry: SymbolEntry): BadgeInfo {
     },
     functionFullSpecialization: {
       className: "badge-function",
-      text: "function full specialization",
-      shortText: "function spec.",
+      text: `${descriptiveName || "function"} full specialization`,
+      shortText: `${descriptiveName || "function"} spec.`,
     },
     variableTemplate: {
       className: "badge-variable",

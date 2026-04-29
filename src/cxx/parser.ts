@@ -2546,7 +2546,8 @@ export class Parser {
           declSpecifier: typeSpec,
           contextType: DeclaratorContextType.Conversion,
         });
-        name += " " + declarator.typeInfo;
+        value = declarator.typeInfo;
+        name += " " + value;
       }
     } else if (this.isIdentifierOrLaTeX()) {
       conceptName =

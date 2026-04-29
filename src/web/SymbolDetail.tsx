@@ -185,9 +185,6 @@ export function SymbolDetail({
               extern "{symbol.languageLinkage}"
             </span>
           )}
-          {showFunction && symbol.constexpr && (
-            <span className="badge badge-concept">constexpr</span>
-          )}
           {showFunction && symbol.explicit && (
             <span className="badge badge-enum">explicit</span>
           )}
@@ -197,16 +194,14 @@ export function SymbolDetail({
           {showFunction && symbol.friend && (
             <span className="badge badge-friend">friend</span>
           )}
-          {showFunction && symbol.operator && (
-            <span className="badge badge-deduction">
-              operator{symbol.operator === '""ms' ? '""...' : symbol.operator}
-            </span>
+          {showFunction && symbol.consteval && (
+            <span className="badge badge-tag">consteval</span>
           )}
-          {showVariable && symbol.constexpr && (
-            <span className="badge badge-concept">constexpr</span>
+          {"constexpr" in symbol && symbol.constexpr && (
+            <span className="badge badge-tag">constexpr</span>
           )}
-          {showVariable && symbol.inline && (
-            <span className="badge badge-concept">inline</span>
+          {"inline" in symbol && symbol.inline && (
+            <span className="badge badge-tag">inline</span>
           )}
           {showVariable && symbol.extern && (
             <span className="badge badge-tag">extern</span>
