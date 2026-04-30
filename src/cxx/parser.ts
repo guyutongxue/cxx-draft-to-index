@@ -1182,6 +1182,7 @@ export class Parser {
             }
             specialFunctionBody = "deleted";
           }
+          declarators.push({ ...declarator, initializer: null });
           break outermost;
         }
         let isTryBlock = false;
