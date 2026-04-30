@@ -201,7 +201,7 @@ interface DeclarationSpecifierInfo {
   typeString: string;
   cvQualifiers: CvQualifierSet;
   declSpecifiers: DeclSpecifierKeyword[];
-  explicitSpecifier: boolean | ExpressionInfo;
+  explicitSpecifier: ExpressionInfo | null;
   classSpecifier: ClassSpecifierInfo | null;
   enumSpecifier: EnumSpecifierInfo | null;
 }
@@ -820,9 +820,8 @@ export class Parser {
           extern,
           static: static_,
           explicit:
-            typeof declSpecifier.explicitSpecifier === "boolean"
-              ? declSpecifier.explicitSpecifier
-              : declSpecifier.explicitSpecifier.raw,
+            declSpecifier.explicitSpecifier?.raw ||
+            declSpecifier.declSpecifiers.includes("explicit"),
           friend: declSpecifier.declSpecifiers.includes("friend"),
           variadic: declarator.function.variadic,
           ctor: declarator.function.ctor,
@@ -1002,7 +1001,7 @@ export class Parser {
       placeholder: false, // @\cv{}@ in std spec
     };
     const declSpecifiers: DeclSpecifierKeyword[] = [];
-    let explicit: boolean | ExpressionInfo = false;
+    let explicitSpecifier: null | ExpressionInfo = null;
 
     const readIdExprAsType = (): { notAType: boolean } => {
       // We hits an id-expression while parsing decl-specifier.
@@ -1072,7 +1071,7 @@ export class Parser {
           this.skipBalancedTokensUntilPunct([")"], false);
           this.consumeP(")");
           const endLoc = this.tok.loc;
-          explicit = { raw: this.lexer.range(startLoc, endLoc) };
+          explicitSpecifier = { raw: this.lexer.range(startLoc, endLoc) };
         }
       } else if (TYPE_SPECIFIER_KEYWORD.includes(id)) {
         typeSpecifiers.push(id);
@@ -1123,7 +1122,7 @@ export class Parser {
       typeString,
       cvQualifiers,
       declSpecifiers,
-      explicitSpecifier: explicit,
+      explicitSpecifier,
       classSpecifier,
       enumSpecifier,
       constraint,
