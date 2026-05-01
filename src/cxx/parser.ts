@@ -676,68 +676,23 @@ export class Parser {
             }),
           );
         }
-      } else if (templateInfo) {
-        if (templateInfo.fullSpecialization) {
-          this.assert(
-            classSpecifier.id.parts.length > 1 || classSpecifier.templateArgs,
-            "full specialization must have template args",
-          );
-          symbols.push(
-            this.buildNestedSymbol(
-              "classFullSpecialization",
-              templateInfo,
-              classSpecifier.id,
-              {
-                classKey: classSpecifier.tagKind,
-                base,
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                templateArgs: classSpecifier.templateArgs?.map((a) => a.raw),
-                members: classSpecifier.members,
-                access,
-              },
-            ),
-          );
-        } else if (classSpecifier.templateArgs) {
-          symbols.push(
-            this.buildNestedSymbol(
-              "classPartialSpecialization",
-              templateInfo,
-              classSpecifier.id,
-              {
-                classKey: classSpecifier.tagKind,
-                base,
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                templateArgs: classSpecifier.templateArgs.map((a) => a.raw),
-                members: classSpecifier.members,
-                access,
-              },
-            ),
-          );
-        } else {
-          symbols.push(
-            this.buildNestedSymbol(
-              "classTemplate",
-              templateInfo,
-              classSpecifier.id,
-              {
-                classKey: classSpecifier.tagKind,
-                base,
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                members: classSpecifier.members,
-                access,
-              },
-            ),
-          );
-        }
       } else {
+        const templatedRaw = this.lexer.range(startLoc, this.tok.loc);
+        const classSymbolInfo = {
+          classKey: classSpecifier.tagKind,
+          raw: classSpecifier.raw + ";",
+          access,
+          base,
+          members: classSpecifier.members,
+        };
         symbols.push(
-          this.buildNestedSymbol("class", templateInfo, classSpecifier.id, {
-            classKey: classSpecifier.tagKind,
-            base,
-            raw: classSpecifier.raw + ";",
-            members: classSpecifier.members,
-            access,
-          }),
+          this.buildNestedSymbol(
+            "class",
+            templateInfo,
+            classSpecifier.id,
+            templatedRaw,
+            classSymbolInfo,
+          ),
         );
       }
     }
@@ -780,21 +735,10 @@ export class Parser {
         );
       }
 
-      const idLastPart = declarator.idExpr.parts.at(-1)!;
-      const partialSpecialization = templateInfo && idLastPart.templateArgs;
-      if (declarator.idExpr.parts.length !== 1) {
-        if (partialSpecialization || templateInfo?.fullSpecialization) {
-          // TODO: check main template's existence through symbol lookup
-        } else {
-          console.warn(
-            `(Re-)declaration of a scoped function or variable (or corresponding template) is not supported: ${declarator.idExpr.name}`,
-          );
-          continue;
-        }
-      }
       if (declarator.function) {
+        const idLastPart = declarator.idExpr.parts.at(-1);
         let operator: string | null = null;
-        switch (idLastPart.kind) {
+        switch (idLastPart?.kind) {
           case IdPartKind.UDL:
           case IdPartKind.Operator:
           case IdPartKind.Conversion:
@@ -808,10 +752,18 @@ export class Parser {
           defaultArg: p.defaultArg?.raw ?? null,
           pack: p.pack,
         }));
-        const misc = {
+        const raw =
+          declSpecifier.raw +
+          " " +
+          declarator.raw +
+          (declaratorList.kind === "functionDefinition" ? "" : ";");
+        const templatedRaw = this.lexer.range(startLoc, this.tok.loc);
+        const functionSymbolInfo = {
+          raw,
           access,
           operator,
           parameters,
+          signatureRequires: declarator.function.constraint?.raw || null,
           returnType: declarator.function.returnType,
           isTrailingReturnType: !!declarator.function.trailingReturnType,
           constexpr,
@@ -846,7 +798,7 @@ export class Parser {
             symbols.push(
               this.buildSymbol("deductionGuideTemplate", {
                 name: declarator.idExpr.name,
-                raw: this.lexer.range(startLoc, this.tok.loc),
+                raw,
                 parameters,
                 targetType: declarator.function.trailingReturnType,
                 templateParams: this.buildTemplateParams(templateInfo),
@@ -860,7 +812,7 @@ export class Parser {
             symbols.push(
               this.buildSymbol("deductionGuide", {
                 name: declarator.idExpr.name,
-                raw: this.lexer.range(startLoc, this.tok.loc),
+                raw: templatedRaw,
                 parameters,
                 targetType: declarator.function.trailingReturnType,
                 variadic: declarator.function.variadic,
@@ -871,56 +823,21 @@ export class Parser {
           }
           break;
         }
-        if (templateInfo) {
-          this.assert(
-            declaratorList.declarators.length === 1,
-            "Function template cannot have multiple declarators",
-          );
-          if (templateInfo.fullSpecialization) {
-            this.assert(
-              idLastPart.templateArgs,
-              `full template specialization should have template args`,
-            );
-            symbols.push(
-              this.buildSymbol("functionFullSpecialization", {
-                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                templateArgs: idLastPart.templateArgs.map((a) => a.raw),
-                signatureRequires: declarator.function.constraint?.raw || null,
-                ...misc,
-              }),
-            );
-          } else {
-            if (partialSpecialization) {
-              this.die(`Function template cannot be partial specialized`);
-            }
-            symbols.push(
-              this.buildSymbol("functionTemplate", {
-                name: declarator.idExpr.name,
-                raw: this.lexer.range(startLoc, this.tok.loc),
-                templateParams: this.buildTemplateParams(templateInfo),
-                templateRequires: templateInfo.requiresClause,
-                signatureRequires: declarator.function.constraint?.raw || null,
-                ...misc,
-              }),
-            );
-          }
-          break;
-        } else {
-          symbols.push(
-            this.buildSymbol("function", {
-              name: declarator.idExpr.name,
-              raw: declSpecifier.raw + " " + declarator.raw + ";",
-              signatureRequires: null,
-              ...misc,
-            }),
-          );
-        }
+        symbols.push(
+          this.buildNestedSymbol(
+            "function",
+            templateInfo,
+            declarator.idExpr,
+            templatedRaw,
+            functionSymbolInfo,
+          ),
+        );
       } else {
         const type = declarator.typeInfo;
-        const raw = this.lexer.range(startLoc, this.tok.loc);
+        const templatedRaw = this.lexer.range(startLoc, this.tok.loc);
+        const raw = declSpecifier.raw + " " + declarator.raw + ";";
         const initializer = declarator.initializer?.raw ?? null;
-        const misc = {
+        const variableSymbolInfo = {
           access,
           type,
           constexpr,
@@ -928,55 +845,17 @@ export class Parser {
           inline,
           static: static_,
           initializer,
+          raw,
         };
-        if (templateInfo) {
-          this.assert(
-            declaratorList.declarators.length === 1,
-            "Variable template cannot have multiple declarators",
-          );
-          if (templateInfo.fullSpecialization) {
-            this.assert(
-              idLastPart.templateArgs,
-              `full template specialization should have template args`,
-            );
-            symbols.push(
-              this.buildSymbol("variableFullSpecialization", {
-                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
-                templateArgs: idLastPart?.templateArgs.map((a) => a.raw),
-                raw,
-                ...misc,
-              }),
-            );
-          } else if (partialSpecialization) {
-            symbols.push(
-              this.buildSymbol("variablePartialSpecialization", {
-                name: this.removeTemplateArgsFromId(declarator.idExpr).name,
-                templateParams: this.buildTemplateParams(templateInfo),
-                templateArgs: partialSpecialization.map((a) => a.raw),
-                raw,
-                ...misc,
-              }),
-            );
-          } else {
-            symbols.push(
-              this.buildSymbol("variableTemplate", {
-                name: declarator.idExpr.name,
-                templateParams: this.buildTemplateParams(templateInfo),
-                templateRequires: templateInfo.requiresClause,
-                raw,
-                ...misc,
-              }),
-            );
-          }
-        } else {
-          symbols.push(
-            this.buildSymbol("variable", {
-              name: declarator.idExpr.name,
-              ...misc,
-              raw: declSpecifier.raw + " " + declarator.raw + ";",
-            }),
-          );
-        }
+        symbols.push(
+          this.buildNestedSymbol(
+            "variable",
+            templateInfo,
+            declarator.idExpr,
+            templatedRaw,
+            variableSymbolInfo,
+          ),
+        );
       }
     }
     return symbols;
@@ -2689,23 +2568,19 @@ export class Parser {
 
   private lookupId(
     id: IdExpressionInfo,
-    templateInfo: TemplateInfo | null,
-    failureHint?: string,
+    templateHeads: readonly PlainTemplateInfo[],
   ): Immutable<SymbolEntry>[] | null {
     const allSymbols = [...this.parsedSymbols, ...this.context.builtSymbols];
     const currentNs = id.fromGlobal ? [] : this.context.nsStack;
     const result = this.lookupIdImpl(
       id.parts,
-      templateInfo ? [...templateInfo.nested, templateInfo] : [],
+      templateHeads,
       currentNs,
       allSymbols,
     );
     if (result) {
       return result;
     }
-    console.warn(
-      `Cannot resolve id: ${id.name} when ${failureHint ?? "looking up symbol"}`,
-    );
     return null;
   }
   private lookupIdImpl(
@@ -2750,32 +2625,31 @@ export class Parser {
         continue;
       }
       const matchTemplate = (idPart: IdExpressionPartInfo) => {
-        // Case 1: primary template (ends with "Template")
+        // Case 1: id part has no template args — matches any plain entity
+        if (!idPart.templateArgs) {
+          return !sym.kind.endsWith("Specialization");
+        }
+        // Case 2: primary template
         if (sym.kind.endsWith("Template")) {
           const sym2 = sym as Extract<
             SymbolEntry,
             { kind: `${string}Template` }
           >;
           if (parts.length === 1) {
-            // Last part: the template head (if any) applies to this symbol.
-            // E.g. `template <typename T> Foo::Bar::C` — T matches C's param count.
+            // Last part: the template head must applies to this symbol.
+            // E.g. `template <typename T> Foo::Bar::C`
             return (
               currentTemplateHeads.length === 1 &&
               currentTemplateHeads[0].templateParameters.length ===
                 sym2.templateParams.length
             );
           }
-          // Non-last part: id part may carry template args
+          // Non-last part: id part must carry template args with directly reference
           // E.g. `template <typename T> Foo::C<T>::Bar` (args are formal params)
           // or   `class A<int>::B` (args are concrete types, no template head)
           if (!idPart.templateArgs) {
             return false;
           }
-          // Try to consume a matching template head if present.
-          // Only consume if head params match the id part's template args
-          // (meaning the args are formal params from the template head).
-          // If head has 0 params (full-specialization head `template<>`),
-          // or params don't match, leave it for inner parts.
           if (idPart.templateArgs.length === sym2.templateParams.length) {
             const headToCheck = currentTemplateHeads[0];
             if (headToCheck) {
@@ -2787,16 +2661,13 @@ export class Parser {
                 .join(", ");
               if (argListOfHead === argListOfIdPart) {
                 currentTemplateHeads.shift();
+                return true;
               }
             }
           }
-          return true;
+          return false;
         }
-        // Case 2: id part has no template args — matches any plain or specialized entity
-        if (!idPart.templateArgs) {
-          return true;
-        }
-        // Case 3: partial specialization (has both templateParams and templateArgs)
+        // Case 3: partial specialization
         // Must consume a template head whose params match the specialization's params.
         if ("templateParams" in sym && sym.templateParams) {
           const currentTemplateHead = currentTemplateHeads.shift();
@@ -2809,6 +2680,11 @@ export class Parser {
           ) {
             return false;
           }
+          if (!currentTemplateHead.templateParameters.every((param, index) => {
+            return param.kind === sym.templateParams![index].kind;
+          })) {
+            return false;
+          }
           if (
             !currentTemplateHead.templateParameters.every((param, index) => {
               return (
@@ -2818,13 +2694,18 @@ export class Parser {
             })
           ) {
             console.warn(
-              `Template parameter list does not match, we cannot figure whether it is the right specialization or not, give up.`,
+              `Template parameter list does not match, we cannot figure whether they are equivalent partial-specialization or not, assuming not related:`,
             );
-            console.warn(templateHeads, idParts, " VS ", sym);
+            console.warn(
+              `  Incoming template-id  : template <${currentTemplateHead.templateParameters.map((p) => p.raw).join(", ")}> ${idPart.name};\n  Looking up template-id: template <${sym.templateParams.map((p) => p.raw).join(", ")}> ${sym.name}${"templateArgs" in sym ? `<${sym.templateArgs.join(", ")}>` : ""};`,
+            );
             return false;
           }
         }
         // Case 4: full specialization (has templateArgs only) or after Case 3 falls through
+        // since we do not support emitting a member specialization
+        // (i.e. template <> template <typename T> struct A<int>::B { ... }; )
+        // so all reference to parent specialization may not contain `template <>`
         if (!("templateArgs" in sym) || !sym.templateArgs) {
           return false;
         } else if (idPart.templateArgs.length !== sym.templateArgs.length) {
@@ -3102,138 +2983,223 @@ export class Parser {
         : null,
     }));
   }
-  private buildSymbol<Kind extends SymbolKind>(
+  private buildSymbol<const Kind extends SymbolKind>(
     kind: Kind,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
       Exclude<keyof SymbolEntryBase, "raw" | "name" | "access"> | "kind"
     >,
   ): ExtractKind<SymbolEntry, Kind> {
-    const result = R.omitBy(
-      {
-        kind,
-        ...info,
-        header: this.filename,
-        namespace: [...this.context.nsStack],
-        languageLinkage: this.context.linkageStack.at(-1) ?? null,
-      } as any,
-      (x) => typeof x === "undefined",
+    const result = {
+      kind,
+      ...info,
+      header: this.filename,
+      namespace: [...this.context.nsStack],
+      languageLinkage: this.context.linkageStack.at(-1) ?? null,
+    } as ExtractKind<SymbolEntry, Kind>;
+    const omitUndefined = R.omitBy(
+      result,
+      (v) => typeof v === "undefined",
     ) as ExtractKind<SymbolEntry, Kind>;
     if (this.context.scopeState === "namespace") {
       this.context = produce(this.context, (ctx) => {
-        ctx.builtSymbols.push(result);
+        ctx.builtSymbols.push(omitUndefined);
       });
     }
-    return result;
+    return omitUndefined;
   }
 
-  private removeTemplateArgsFromId(idExpr: IdExpressionInfo): IdExpressionInfo {
-    const clone = [...idExpr.parts];
+  private removeSpecialization(
+    template: TemplateInfo,
+    idExpr: IdExpressionInfo,
+  ): { templateHeads: PlainTemplateInfo[]; idExpr: IdExpressionInfo } {
+    // remove last-level template head
+    const templateHeads = [...template.nested];
+    const clonedId = [...idExpr.parts];
     const lastPart: IdExpressionPartInfo | { value?: undefined } = {
-      ...clone.pop()!,
+      ...clonedId.pop()!,
     };
     this.assert(
       lastPart.value,
       `Cannot call removeTemplateArgsFromId on a computed type-id`,
     );
+    if (!lastPart.templateArgs) {
+      this.die(`Cannot deal with specialization of member: ${idExpr.name}`);
+    }
     lastPart.templateArgs = null;
-    return {
-      name: `${idExpr.fromGlobal ? "::" : ""}${clone.map((p) => p.name + "::").join("")}${lastPart.value}`,
+    const newIdExpr: IdExpressionInfo = {
+      name: `${idExpr.fromGlobal ? "::" : ""}${clonedId.map((p) => p.name + "::").join("")}${lastPart.value}`,
       fromGlobal: idExpr.fromGlobal,
-      parts: [...clone, lastPart],
+      parts: [...clonedId, lastPart],
     };
+    return { templateHeads, idExpr: newIdExpr };
   }
 
-  private buildNestedSymbol<Kind extends Extract<SymbolKind, `class${string}`>>(
+  private buildNestedSymbol<
+    const Kind extends "class" | "function" | "variable",
+  >(
     kind: Kind,
     templateInfo: TemplateInfo | null,
     id: IdExpressionInfo,
+    templatedRaw: string,
     info: Omit<
       ExtractKind<SymbolEntry, Kind>,
-      | Exclude<keyof SymbolEntryBase, "raw" | "access">
-      | "kind"
-      | keyof Template
-      | "templateArgs"
-    > & { templateArgs?: string[] },
+      Exclude<keyof SymbolEntryBase, "raw" | "access"> | "kind"
+    >,
   ): SymbolEntry {
     this.assert(
       id.parts.length > 0,
       "id-expression in a class declaration should have at least one part",
     );
-    const idExprWithoutTemplateArgs = this.removeTemplateArgsFromId(id);
     if (id.parts.length === 1) {
-      const info2 = info as any;
-      switch (kind) {
-        case "class": {
-          return this.buildSymbol("class", {
-            name: id.name,
-            ...info2,
-          });
+      if (templateInfo) {
+        this.assert(
+          templateInfo.nested.length === 0,
+          "unqualified id cannot have multiple template heads",
+        );
+        const templateArgs = id.parts[0]!.templateArgs?.map((arg) => arg.raw);
+        if (templateInfo.fullSpecialization) {
+          this.assert(
+            templateArgs,
+            "template-id expected for a full specialization",
+          );
+          return this.buildSymbol(
+            `${kind as "class" | "function" | "variable"}FullSpecialization`,
+            {
+              ...info,
+              name: this.removeSpecialization(templateInfo, id).idExpr.name,
+              raw: templatedRaw,
+              templateArgs,
+            },
+          );
+        } else if (templateArgs) {
+          this.assert(
+            kind !== "function",
+            "function partial specialization is not allowed",
+          );
+          return this.buildSymbol(
+            `${kind as "class" | "variable"}PartialSpecialization`,
+            {
+              ...info,
+              name: this.removeSpecialization(templateInfo, id).idExpr.name,
+              raw: templatedRaw,
+              templateParams: this.buildTemplateParams(templateInfo),
+              templateRequires: templateInfo.requiresClause,
+              templateArgs,
+            },
+          );
+        } else {
+          return this.buildSymbol(
+            `${kind as "class" | "function" | "variable"}Template`,
+            {
+              ...info,
+              name: id.name,
+              raw: templatedRaw,
+              templateParams: this.buildTemplateParams(templateInfo),
+              templateRequires: templateInfo.requiresClause,
+            },
+          );
         }
-        case "classTemplate": {
-          return this.buildSymbol("classTemplate", {
-            name: id.name,
-            templateParams: this.buildTemplateParams(templateInfo!),
-            templateRequires: templateInfo!.requiresClause,
-            ...info2,
-          });
-        }
-        case "classFullSpecialization": {
-          return this.buildSymbol("classFullSpecialization", {
-            name: idExprWithoutTemplateArgs.name,
-            ...info2,
-          });
-        }
-        case "classPartialSpecialization": {
-          return this.buildSymbol("classPartialSpecialization", {
-            name: idExprWithoutTemplateArgs.name,
-            templateParams: this.buildTemplateParams(templateInfo!),
-            templateRequires: templateInfo!.requiresClause,
-            ...info2,
-          });
-        }
+      } else {
+        return this.buildSymbol(kind as "class" | "function" | "variable", {
+          ...info,
+          name: id.name,
+        });
       }
     } else {
       this.assert(
         this.context.scopeState === "namespace",
         "The parsing of nested class declaration only works in namespace scope",
       );
-      const [forwardDeclSymbol, ...scopeSymbols] =
-        this.lookupId(
-          idExprWithoutTemplateArgs,
-          templateInfo,
-          `building nested symbol`,
-        ) ?? [];
-      if (!forwardDeclSymbol) {
-        this.die(
-          `Cannot find parent symbol for nested class declaration: ${id.name}`,
+      const templateHeads = templateInfo
+        ? [...templateInfo.nested, templateInfo]
+        : [];
+      let currentDeclKind: "redeclaration" | "specialization" = "redeclaration";
+      let lookupSymbolChain = this.lookupId(id, templateHeads);
+      if (!lookupSymbolChain) {
+        console.warn(
+          `The looking up of nested id ${id.name} failed with redeclaration, try specialization...`,
         );
+        this.assert(
+          templateInfo,
+          `A specialization declaration must have a template head`,
+        );
+        const { templateHeads: strippedTemplateHeads, idExpr: strippedIdExpr } =
+          this.removeSpecialization(templateInfo, id);
+        lookupSymbolChain = this.lookupId(
+          strippedIdExpr,
+          strippedTemplateHeads,
+        );
+        this.assert(
+          lookupSymbolChain,
+          `Cannot find forward declaration for specialization: ${id.name}`,
+        );
+        currentDeclKind = "specialization";
       }
-      let currentSymbol: SymbolEntry & { members: ClassMemberEntry[] | null };
+      const [prevDeclSymbol, ...scopeSymbols] = lookupSymbolChain;
+      let currentSymbol: SymbolEntry;
+      const isTemplated = [
+        "Template",
+        "PartialSpecialization",
+        "FullSpecialization",
+      ].some((suffix) => prevDeclSymbol.kind.endsWith(suffix));
       {
-        using enterMemberScope = this.enterMemberScope();
-        const name = idExprWithoutTemplateArgs.parts.at(-1)!.name;
-        currentSymbol = this.buildSymbol(
-          forwardDeclSymbol.kind as "class",
-          {
-            name,
+        using disableBuiltSymbolEmission = this.enterMemberScope();
+        if (currentDeclKind === "redeclaration") {
+          currentSymbol = this.buildSymbol(prevDeclSymbol.kind, {
             templateParams:
-              "templateParams" in forwardDeclSymbol && templateInfo
+              "templateParams" in prevDeclSymbol && templateInfo
                 ? this.buildTemplateParams(templateInfo)
                 : void 0,
             templateRequires:
-              "templateRequires" in forwardDeclSymbol && templateInfo
+              "templateRequires" in prevDeclSymbol && templateInfo
                 ? templateInfo.requiresClause
                 : void 0,
             ...info,
-          } as any,
-        );
+            name: prevDeclSymbol.name,
+            raw: isTemplated ? templatedRaw : info.raw,
+          });
+        } else {
+          this.assert(
+            templateInfo,
+            `specialization declaration must have template info`,
+          );
+          const gKind = kind as "class" | "function" | "variable";
+          this.assert(
+            prevDeclSymbol.kind === `${gKind}Template`,
+            `Only template declaration can have specialization`,
+          );
+          const newKind = templateInfo.fullSpecialization
+            ? (`${gKind}FullSpecialization` as const)
+            : (`${gKind}PartialSpecialization` as const);
+          this.assert(
+            newKind !== "functionPartialSpecialization",
+            `function partial specialization is not allowed`,
+          );
+          const templateArgs = id.parts.at(-1)?.templateArgs;
+          this.assert(
+            templateArgs,
+            `specialization declaration must have template arguments`,
+          );
+          currentSymbol = this.buildSymbol(newKind, {
+            ...info,
+            name: id.name,
+            raw: templatedRaw,
+            templateParams: templateInfo.fullSpecialization
+              ? void 0
+              : this.buildTemplateParams(templateInfo),
+            templateRequires: templateInfo.fullSpecialization
+              ? void 0
+              : templateInfo.requiresClause,
+            templateArgs: templateArgs.map((arg) => arg.raw),
+          });
+        }
       }
       for (const memberSym of scopeSymbols) {
         currentSymbol = {
-          ...(memberSym as any),
+          ...memberSym,
           members: [currentSymbol as ClassMemberEntry],
-        };
+        } as Extract<SymbolEntry, { members: unknown }>;
       }
       this.context = produce(this.context, (ctx) => {
         ctx.builtSymbols.push(currentSymbol);
