@@ -35,6 +35,8 @@ function computeIdImpl(symbol: SymbolEntry, namespace: string | null): string {
   if ("cvRef" in symbol) {
     id += symbol.cvRef.replace(/\s+/g, "");
   }
+  // uh-oh, router doesn't like slashes in the id... let's replace them with another punctuation lol
+  id = id.replace(/\//g, "／");
   cache.set(symbol, id);
   return id;
 }

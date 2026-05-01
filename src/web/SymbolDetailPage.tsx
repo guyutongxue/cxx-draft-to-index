@@ -60,7 +60,7 @@ export function SymbolDetailPage() {
   let current: SymbolEntry = entry.symbol;
 
   if (splat) {
-    const segments = splat.split("/").filter((s) => s.length > 0);
+    const segments = splat.split("/");
     for (const segId of segments) {
       const member = findMemberByLocalId(current, segId);
       if (!member) break;
@@ -73,7 +73,7 @@ export function SymbolDetailPage() {
 
   const handleMemberClick = (memberId: string) => {
     navigate(
-      `/symbols/${encodeURIComponent(symbolId)}/${splat ? `${splat}/` : ""}${encodeURIComponent(memberId)}?${search}`,
+      `/symbols/${symbolId}/${splat ? `${splat}/` : ""}${memberId}?${search}`,
     );
   };
 
@@ -120,7 +120,7 @@ export function SymbolDetailPage() {
             onClick={() => {
               const idChain = chain
                 .slice(0, -1)
-                .map((c) => encodeURIComponent(c.id))
+                .map((c) => c.id)
                 .join("/");
               navigate(`/symbols/${idChain}?${search}`);
             }}

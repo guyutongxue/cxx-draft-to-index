@@ -284,6 +284,23 @@ interface PartialDeclaratorInfo {
   surrounding: DeclaratorSurrounding[];
 }
 
+/**
+ * Disambiguation proudly failed and we must hard code them as variable
+ */
+const KNOWN_VARIABLES_NAME = [
+  "strong_ordering::less",
+  "strong_ordering::equal",
+  "strong_ordering::equivalent",
+  "strong_ordering::greater",
+  "partial_ordering::less",
+  "partial_ordering::equivalent",
+  "partial_ordering::greater",
+  "partial_ordering::unordered",
+  "weak_ordering::less",
+  "weak_ordering::equivalent",
+  "weak_ordering::greater",
+];
+
 export class Parser {
   private readonly filename: string;
 
@@ -835,7 +852,11 @@ export class Parser {
       } else {
         const type = declarator.typeInfo;
         const templatedRaw = this.lexer.range(startLoc, this.tok.loc);
-        const raw = declSpecifier.raw + " " + declarator.raw + ";";
+        const raw =
+          declSpecifier.raw +
+          " " +
+          declarator.raw +
+          `${declarator.initializer?.raw ?? ""};`;
         const initializer = declarator.initializer?.raw ?? null;
         const variableSymbolInfo = {
           access,
@@ -1117,6 +1138,12 @@ export class Parser {
           this.skipBalancedBrackets("{", "}");
           const endLoc = this.tok.loc;
           initializer = { raw: this.lexer.range(startLoc, endLoc) };
+        } else if (this.isP("(")) {
+          // int v(x);
+          const startLoc = this.tok.loc;
+          this.skipBalancedBrackets("(", ")");
+          const endLoc = this.tok.loc;
+          initializer = { raw: this.lexer.range(startLoc, endLoc) };
         }
       }
       declarators.push({ ...declarator, initializer });
@@ -1305,9 +1332,14 @@ export class Parser {
     while (this.isP("[") || this.isP("(")) {
       if (this.isP("(")) {
         //! LOOSE PARSE: always consider this is a function declarator,
-        // not the start of direct-initializer since latter case is rarely used
-        // in standard synopsis... and we CANNOT disambiguate them AT ALL, e.g.:
-        // `int f(X);` is this function accepting X or variable initialized from X?
+        // not the start of direct-initializer... and we CANNOT disambiguate them AT ALL, e.g.:
+        // We cannot distinguish `int f(X);` from function accepting X or variable initialized from X.
+        // For variable that REALLY is direct-initialized, include them in KNOWN_VARIABLES_NAME.
+        const isHardcodedDirectInitVars =
+          idExpr && KNOWN_VARIABLES_NAME.includes(idExpr.name);
+        if (isHardcodedDirectInitVars) {
+          break;
+        }
         try {
           using transaction = this.createRevertTransaction();
           surrounding.push(this.parseParameterAndQualifiers());
@@ -2636,9 +2668,11 @@ export class Parser {
             { kind: `${string}Template` }
           >;
           if (parts.length === 1) {
-            // Last part: the template head must applies to this symbol.
+            // Last part: the template head must applies to this symbol and no
+            // templateArg permitted to the last part.
             // E.g. `template <typename T> Foo::Bar::C`
             return (
+              idPart.templateArgs === null &&
               currentTemplateHeads.length === 1 &&
               currentTemplateHeads[0].templateParameters.length ===
                 sym2.templateParams.length
@@ -2991,12 +3025,13 @@ export class Parser {
       ExtractKind<SymbolEntry, Kind>,
       Exclude<keyof SymbolEntryBase, "raw" | "name" | "access"> | "kind"
     >,
+    overrideNs?: readonly NamespaceInfo[],
   ): ExtractKind<SymbolEntry, Kind> {
     const result = {
       kind,
       ...info,
       header: this.filename,
-      namespace: [...this.context.nsStack],
+      namespace: overrideNs || [...this.context.nsStack],
       languageLinkage: this.context.linkageStack.at(-1) ?? null,
     } as ExtractKind<SymbolEntry, Kind>;
     const omitUndefined = R.omitBy(
@@ -3148,6 +3183,10 @@ export class Parser {
       {
         using disableBuiltSymbolEmission = this.enterMemberScope();
         if (currentDeclKind === "redeclaration") {
+          this.assert(
+            prevDeclSymbol.kind.startsWith(kind),
+            `Redeclaration ${prevDeclSymbol.name} (${id.name}) with different kind: ${prevDeclSymbol.kind} vs ${kind}`,
+          );
           currentSymbol = this.buildSymbol(prevDeclSymbol.kind, {
             templateParams:
               "templateParams" in prevDeclSymbol && templateInfo
@@ -3183,18 +3222,22 @@ export class Parser {
             templateArgs,
             `specialization declaration must have template arguments`,
           );
-          currentSymbol = this.buildSymbol(newKind, {
-            ...info,
-            name: id.name,
-            raw: templatedRaw,
-            templateParams: templateInfo.fullSpecialization
-              ? void 0
-              : this.buildTemplateParams(templateInfo),
-            templateRequires: templateInfo.fullSpecialization
-              ? void 0
-              : templateInfo.requiresClause,
-            templateArgs: templateArgs.map((arg) => arg.raw),
-          });
+          currentSymbol = this.buildSymbol(
+            newKind,
+            {
+              ...info,
+              name: prevDeclSymbol.name,
+              raw: templatedRaw,
+              templateParams: templateInfo.fullSpecialization
+                ? void 0
+                : this.buildTemplateParams(templateInfo),
+              templateRequires: templateInfo.fullSpecialization
+                ? void 0
+                : templateInfo.requiresClause,
+              templateArgs: templateArgs.map((arg) => arg.raw),
+            },
+            prevDeclSymbol.namespace,
+          );
         }
       }
       for (const memberSym of scopeSymbols) {
