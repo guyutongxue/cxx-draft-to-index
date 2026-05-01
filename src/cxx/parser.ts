@@ -2680,9 +2680,11 @@ export class Parser {
           ) {
             return false;
           }
-          if (!currentTemplateHead.templateParameters.every((param, index) => {
-            return param.kind === sym.templateParams![index].kind;
-          })) {
+          if (
+            !currentTemplateHead.templateParameters.every((param, index) => {
+              return param.kind === sym.templateParams![index].kind;
+            })
+          ) {
             return false;
           }
           if (
@@ -2767,7 +2769,7 @@ export class Parser {
         }
         default: {
           const _exhaustiveCheck: never = idPart.kind;
-          this.die(`Unknown IdPartKind: ${(idPart as any).kind}`);
+          this.die(`Unknown IdPartKind: ${idPart.kind}`);
         }
       }
       this.die(`unreachable`);
