@@ -12,27 +12,23 @@ import { preprocessCode } from "./pp";
 export { preprocessCode };
 
 export function parseCodeblock(
-  code: string,
-  filename: string,
+  preprocessedCode: string,
+  header: string,
   parsedSymbols?: SymbolEntry[],
 ): SymbolEntry[] {
-  const { preprocessedCode, macroSymbols } = preprocessCode(code, filename);
-
   const lexer = new Lexer(preprocessedCode);
-  const parser = new Parser(lexer, filename, parsedSymbols);
-  const symbols = parser.parseTopLevel();
-
-  return [...macroSymbols, ...symbols];
+  const parser = new Parser(lexer, header, parsedSymbols);
+  return parser.parseTopLevel();
 }
 
 function preprocessCodeblock(
-  filename: string,
+  header: string,
   codeblock: Codeblock,
   emitIncludes: (incs: string[]) => void,
 ): PreprocessedCodeblock {
   const { preprocessedCode, macroSymbols, includes } = preprocessCode(
     codeblock.code,
-    filename,
+    header,
   );
   emitIncludes(includes);
   return { ...codeblock, preprocessedCode, macroSymbols };
@@ -46,12 +42,12 @@ export function preprocessHeader(header: Header): PreprocessedHeader {
     }
   };
   const synopsis = preprocessCodeblock(
-    header.filename,
+    header.headerName,
     header.synopsis,
     emitIncludes,
   );
   const classDefinitions = header.classDefinitions.map((codeblock) =>
-    preprocessCodeblock(header.filename, codeblock, emitIncludes),
+    preprocessCodeblock(header.headerName, codeblock, emitIncludes),
   );
   return { ...header, synopsis, classDefinitions, includes };
 }
