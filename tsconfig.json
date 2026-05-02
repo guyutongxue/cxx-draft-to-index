@@ -24,7 +24,7 @@
     "src",
     "dist/std-index.json",
     "__tests__"
-  ],
+, "output.d.ts"  ],
   "exclude": [
     "src/web"
   ],
