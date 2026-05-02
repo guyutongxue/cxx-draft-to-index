@@ -25,7 +25,6 @@ const CPPREF_GENERATED_URL =
 const CPPREF_SUBPAGES_URL =
   "https://cdn.jsdelivr.net/npm/@gytx/cppreference-index@latest/dist/subpages.json";
 
-const STD_INDEX_PATH = join(import.meta.dir, "../dist/std-index.json");
 const OUTPUT_PATH = join(import.meta.dir, "../dist/link-map.json");
 
 function namespaceToFQN(ns: NamespaceInfo[]): string {
