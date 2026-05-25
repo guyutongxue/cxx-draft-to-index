@@ -16,7 +16,7 @@
   "scripts": {
     "extract": "node src/main.ts",
     "link-map": "node src/link-map.ts",
-    "build": "rm -rf dist && pnpm extract && vite build",
+    "build": "rimraf dist && pnpm extract && vite build",
     "dev": "vite",
     "start": "vite preview",
     "test": "vitest"
