@@ -5,7 +5,7 @@ import { mergeSymbols } from "./merge.ts";
 import { topologicalSort } from "./sort.ts";
 import assert from "node:assert";
 import path from "node:path";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 
 const OUTPUT_FILE = "dist/std-index.json";
 
@@ -67,6 +67,7 @@ async function main() {
 
   const outputPath = path.join(import.meta.dirname, "..", OUTPUT_FILE);
 
+  await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(output, null, 2));
   const totalSymbols = output.headers.reduce(
     (sum, h) => sum + h.symbols.length,

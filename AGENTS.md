@@ -20,20 +20,20 @@ A React web frontend (`src/web/`) serves the generated index. It is a separate t
 
 | Action | Command | Notes |
 |--------|---------|-------|
-| Install | `bun install` | |
-| Extract index only | `bun run extract` | Runs `src/main.ts`; requires submodule |
-| Full build (extract + web) | `bun run build` | CI runs this |
-| Dev server (watch mode) | `bun run dev` | Serves `src/web/` at `:3000` |
-| Production server | `bun run start` | |
-| All tests | `bun test` | |
-| Single test file | `bun test __tests__/parser.test.ts` | |
-| Single test by name | `bun test -t "pattern"` | |
-| Type-check backend | `bunx tsc --noEmit` | Excludes `src/web/` |
-| Type-check web | `bunx tsc -p tsconfig.web.json --noEmit` | |
+| Install | `pnpm install` | |
+| Extract index only | `pnpm extract` | Runs `src/main.ts`; requires submodule |
+| Full build (extract + web) | `pnpm build` | CI runs this |
+| Dev server (HMR) | `pnpm dev` | Runs Vite dev server |
+| Production server | `pnpm start` | Runs Vite preview on built `dist/` |
+| All tests | `pnpm test` | |
+| Single test file | `pnpm test __tests__/parser.test.ts` | |
+| Single test by name | `pnpm test -t "pattern"` | |
+| Type-check backend | `pnpm exec tsc --noEmit` | Excludes `src/web/` |
+| Type-check web | `pnpm exec tsc -p tsconfig.web.json --noEmit` | |
 
 **Submodule prerequisite:** `git submodule update --remote --init` before first build.
 
-**CI** (`.github/workflows/ci.yml`): checkout with submodules → `bun install --frozen-lockfile` → `bun run build` → uploads `dist/std-index.json` artifact.
+**CI** (`.github/workflows/ci.yml`): checkout with submodules → `pnpm install --frozen-lockfile` → `pnpm run build` → uploads `dist/std-index.json` artifact.
 
 ## Key Dependencies
 
@@ -61,7 +61,7 @@ Also contains `REQUIRED_MISSING_INCLUDES` — headers that need extra `#include`
 - Use `import type` for type-only imports
 - Node built-ins with `node:` prefix: `import { join } from "node:path"`
 - Group imports: external → parent modules → sibling modules
-- Use `import.meta.dir` (Bun-specific) for resolving paths relative to source file
+- Use `import.meta.dir` for resolving paths relative to source file
 
 ## Parser-Specific Patterns
 
@@ -83,7 +83,7 @@ Also contains `REQUIRED_MISSING_INCLUDES` — headers that need extra `#include`
 
 ## Testing
 
-- Framework: Bun's built-in `bun:test` (`expect`, `test`)
+- Framework: `vitest` (`expect`, `test`)
 - Location: `__tests__/`
 - Import directly from source: `import { Lexer } from "../src/cxx/lexer"`
 - `toMatchObject()` for partial shape matching; `toThrowError()` for failure tests

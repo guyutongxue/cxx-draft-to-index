@@ -15,13 +15,14 @@ This project aims to extract structured information from C++ Committee draft pap
 
 ### Prerequisites
 
-- [Bun](https://bun.sh)
+- [Node.js](https://nodejs.org) >= 26
+- [pnpm](https://pnpm.io)
 
 ### Installation
 
 ```bash
 # Install dependencies
-bun install
+pnpm install
 ```
 
 ### Running
@@ -30,7 +31,7 @@ bun install
 # Fetch the latest C++ Standard draft source
 git submodule update --remote --init
 # Build/run the main script
-bun run src/main.ts
+pnpm extract
 ```
 
 ## License
