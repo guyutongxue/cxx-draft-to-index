@@ -1,4 +1,4 @@
-import type { SymbolEntry, TemplateParameter, Parameter } from "./types";
+import type { SymbolEntry, TemplateParameter, Parameter } from "./types.ts";
 
 function templateParamKey(param: TemplateParameter): string {
   return (

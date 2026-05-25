@@ -2,17 +2,18 @@
 // Token types
 // ============================================================
 
-import { resolveLaTeXInText } from "./latex";
+import { resolveLaTeXInText } from "./latex.ts";
 
-export enum TokenType {
-  Identifier,
-  Number,
-  StringLiteral,
-  CharLiteral,
-  Punct,
-  LatexEscape, // @...@
-  EOF,
-}
+export const TokenType = {
+  Identifier: "Identifier",
+  Number: "Number",
+  StringLiteral: "StringLiteral",
+  CharLiteral: "CharLiteral",
+  Punct: "Punct",
+  LatexEscape: "LatexEscape",
+  EOF: "EOF",
+} as const;
+export type TokenType = (typeof TokenType)[keyof typeof TokenType];
 
 export interface Location {
   readonly line: number;

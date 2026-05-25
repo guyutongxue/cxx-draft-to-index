@@ -9,10 +9,16 @@ import type {
   SymbolKind,
   Template,
   TemplateParameter,
-} from "../share/types";
-import { resolveLatex } from "./latex";
-import { Lexer, Location, Punctuation, Token, TokenType } from "./lexer";
-import { Draft, Immutable, produce } from "immer";
+} from "../share/types.ts";
+import { resolveLatex } from "./latex.ts";
+import {
+  Lexer,
+  type Location,
+  type Punctuation,
+  Token,
+  TokenType,
+} from "./lexer.ts";
+import { type Draft, type Immutable, produce } from "immer";
 import * as R from "remeda";
 
 interface ParserContext {
@@ -58,14 +64,16 @@ interface TemplateInfo extends PlainTemplateInfo {
   nested: PlainTemplateInfo[]; // from outer to inner
 }
 
-enum DeclarationContextType {
-  Unknown = "unknown",
-  Class = "class",
-  TopLevel = "topLevel",
-  Trailing = "trailing",
-  Parameter = "parameter",
-  Conversion = "conversion", // operator const int () const;
-}
+const DeclarationContextType = {
+  Unknown: "Unknown",
+  Class: "Class",
+  TopLevel: "TopLevel",
+  Trailing: "Trailing",
+  Parameter: "Parameter",
+  Conversion: "Conversion", // operator const int () const;
+} as const;
+type DeclarationContextType =
+  (typeof DeclarationContextType)[keyof typeof DeclarationContextType];
 
 interface ExpressionInfo {
   raw: string;
@@ -106,17 +114,18 @@ type VertSpecifierKw = "override" | "final";
 
 type DeclSpecifierKeyword = (typeof DECL_SPECIFIER_KEYWORD)[number];
 
-enum IdPartKind {
-  Identifier,
+const IdPartKind = {
+  Identifier: "Identifier",
   // must be the tail
-  Operator,
-  Conversion,
-  UDL,
-  Destructor,
+  Operator: "Operator",
+  Conversion: "Conversion",
+  UDL: "UDL",
+  Destructor: "Destructor",
   // must be the scope
-  Computed, // decltype, pack-index, splice
-  PointerToMember, // T::*
-}
+  Computed: "Computed", // decltype, pack-index, splice
+  PointerToMember: "PointerToMember", // T::*
+} as const;
+type IdPartKind = (typeof IdPartKind)[keyof typeof IdPartKind];
 
 interface TemplateArgumentInfo {
   raw: string;
@@ -206,11 +215,13 @@ interface DeclarationSpecifierInfo {
   enumSpecifier: EnumSpecifierInfo | null;
 }
 
-enum DeclaratorContextType {
-  Declaration = "declaration",
-  Parameter = "parameter", // can be abstract
-  Conversion = "conversion", // no paren, function and array allowed
-}
+const DeclaratorContextType = {
+  Declaration: "declaration",
+  Parameter: "parameter", // can be abstract
+  Conversion: "conversion", // no paren, function and array allowed
+} as const;
+type DeclaratorContextType =
+  (typeof DeclaratorContextType)[keyof typeof DeclaratorContextType];
 
 interface DeclaratorInfo {
   pack: boolean;
@@ -1898,9 +1909,12 @@ export class Parser {
     }
 
     const mayDeclare =
-      [DeclarationContextType.TopLevel, DeclarationContextType.Class].includes(
-        contextType,
-      ) && !previousSpecifiers.includes("friend");
+      (
+        [
+          DeclarationContextType.TopLevel,
+          DeclarationContextType.Class,
+        ] as DeclarationContextType[]
+      ).includes(contextType) && !previousSpecifiers.includes("friend");
 
     const templateArgs = idExpr?.parts.at(-1)?.templateArgs ?? null;
     if (mayDeclare && idExpr && !templateArgs) {

@@ -1,4 +1,4 @@
-import { Token, TokenType } from "./lexer";
+import { Token, TokenType } from "./lexer.ts";
 
 const LATEX_SIMPLE: Record<string, string> = {
   "\\seebelow": "/* see_below */",

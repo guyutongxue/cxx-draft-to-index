@@ -4,10 +4,10 @@ import type {
   PreprocessedCodeblock,
   PreprocessedHeader,
   SymbolEntry,
-} from "../share/types";
-import { Lexer } from "./lexer";
-import { Parser } from "./parser";
-import { preprocessCode } from "./pp";
+} from "../share/types.ts";
+import { Lexer } from "./lexer.ts";
+import { Parser } from "./parser.ts";
+import { preprocessCode } from "./pp.ts";
 
 export { preprocessCode };
 

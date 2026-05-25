@@ -1,6 +1,6 @@
 import assert from "node:assert";
-import { computeSymbolId } from "./share/symbol_id";
-import type { ClassMemberEntry, SymbolEntry } from "./share/types";
+import { computeSymbolId } from "./share/symbol_id.ts";
+import type { ClassMemberEntry, SymbolEntry } from "./share/types.ts";
 import { produce } from "immer";
 
 export function mergeSymbols(symbols: readonly SymbolEntry[]): SymbolEntry[] {

@@ -5,10 +5,10 @@ import {
   useMatch,
 } from "react-router-dom";
 import { useMemo } from "react";
-import { FlatSymbol, useData } from "./DataContext";
+import { type FlatSymbol, useData } from "./DataContext";
 import { SearchBar } from "./SearchBar";
 import { SymbolCard } from "./SymbolCard";
-import { SymbolEntry } from "../share/types";
+import type { SymbolEntry } from "../share/types";
 
 export function Layout() {
   const { data, allSymbols } = useData();

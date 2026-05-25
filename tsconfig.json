@@ -1,32 +1,38 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "ESNext",
+    "module": "NodeNext",
     "lib": [
       "ESNext"
     ],
-    "moduleResolution": "bundler",
-    "strict": true,
-    "skipLibCheck": true,
+
+    "types": [
+      "node"
+    ],
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
 
     "declaration": true,
     "emitDeclarationOnly": true,
-
     "composite": true,
     "incremental": true,
-    "outDir": "dist",
 
-    "types": [
-      "bun"
-    ],
+    "strict": true,
+    "skipLibCheck": true,
   },
   "include": [
     "src",
     "dist/std-index.json",
-    "__tests__"
-, "output.d.ts"  ],
+    "__tests__",
+    "output.d.ts"
+  ],
   "exclude": [
     "src/web"
   ],
-  "references": [{ "path": "./tsconfig.web.json" }]
+  "references": [
+    {
+      "path": "./tsconfig.web.json"
+    }
+  ]
 }

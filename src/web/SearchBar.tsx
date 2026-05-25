@@ -1,4 +1,4 @@
-import { SubmitEvent, useEffect, useRef } from "react";
+import { type SubmitEvent, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export function SearchBar() {

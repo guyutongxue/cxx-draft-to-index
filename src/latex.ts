@@ -1,8 +1,8 @@
-import { Glob } from "bun";
+import { glob, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { Codeblock, Header } from "./share/types";
+import type { Codeblock, Header } from "./share/types.ts";
 
-const SUBMODULE_SOURCE_DIR = resolve(import.meta.dir, "../deps/draft/source");
+const SUBMODULE_SOURCE_DIR = resolve(import.meta.dirname, "../deps/draft/source");
 
 const PATCHES: Record<string, [string, string][]> = {
   // format: "filename.tex": [["target string to replace", "replacement string"], ...]
@@ -37,13 +37,13 @@ type AnyTuple = [unknown, ...unknown[]];
 export async function loadAllTexFiles(): Promise<Map<string, string>> {
   const files = new Map<string, Promise<string>>();
 
-  for await (const name of new Glob("*.tex").scan(SUBMODULE_SOURCE_DIR)) {
+  for await (const name of glob("*.tex", { cwd: SUBMODULE_SOURCE_DIR })) {
     if (name === "future.tex") {
       // this file contains deprecated synopses, skip
       continue;
     }
     const filePath = join(SUBMODULE_SOURCE_DIR, name);
-    const content = Bun.file(filePath).text();
+    const content = readFile(filePath, "utf-8");
     files.set(name, content);
   }
 
@@ -88,6 +88,7 @@ function isHeaderMarker(line: string): string | null {
 }
 
 class LaTeXFile {
+  private filename: string;
   readonly lines: string[];
   lineIdx = 0;
   sectionTitle = "";
@@ -98,9 +99,10 @@ class LaTeXFile {
   }
 
   constructor(
-    private filename: string,
+    filename: string,
     content: string,
   ) {
+    this.filename = filename;
     this.lines = content.split("\n");
   }
 

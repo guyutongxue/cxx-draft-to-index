@@ -1,5 +1,5 @@
-import { expect, test } from "bun:test";
-import { Lexer } from "../src/cxx/lexer";
+import { expect, test } from "vitest";
+import { Lexer } from "../src/cxx/lexer.ts";
 
 test("lexer handles backslash char literal", () => {
   const lexer = new Lexer("'\\\\'");

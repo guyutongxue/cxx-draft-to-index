@@ -1,5 +1,5 @@
-import { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../share/types";
-import { resolveLaTeXInText } from "./latex";
+import type { FunctionLikeMacroSymbolEntry, MacroSymbolEntry } from "../share/types.ts";
+import { resolveLaTeXInText } from "./latex.ts";
 
 export interface PreprocessResult {
   preprocessedCode: string;

@@ -4,7 +4,7 @@ import type {
   NamespaceInfo,
   Parameter,
   SymbolEntry,
-} from "../share/types";
+} from "../share/types.ts";
 import { computeSymbolId } from "../share/symbol_id";
 
 const API_URL = "/std-index.json";

@@ -1,9 +1,10 @@
 // THIS FILE IS TOTALLY AI SLOPS AND I CANNOT HELP WITH THAT
 
-import type { SymbolEntry, NamespaceInfo } from "./share/types";
-import { computeSymbolId } from "./share/symbol_id";
+import type { SymbolEntry, NamespaceInfo } from "./share/types.ts";
+import { computeSymbolId } from "./share/symbol_id.ts";
 import { join } from "node:path";
 import type { Index as CppRefIndex } from "@gytx/cppreference-index";
+import { writeFile } from "node:fs/promises";
 
 interface SubpageEntry {
   link: string;
@@ -25,7 +26,7 @@ const CPPREF_GENERATED_URL =
 const CPPREF_SUBPAGES_URL =
   "https://cdn.jsdelivr.net/npm/@gytx/cppreference-index@latest/dist/subpages.json";
 
-const OUTPUT_PATH = join(import.meta.dir, "../dist/link-map.json");
+const OUTPUT_PATH = join(import.meta.dirname, "../dist/link-map.json");
 
 function namespaceToFQN(ns: NamespaceInfo[]): string {
   return ns.map((n) => n.name ?? "(anon)").join("::");
@@ -110,15 +111,14 @@ async function main() {
   }
   console.log(`  subpages: ${parsedSubpages.length} entries`);
 
-  const { default: stdIndex } = await import("#std-index");
+  const { default: stdIndex } = await import("#std-index", {
+    with: { type: "json" },
+  });
   const mappings = new Map<string, string>();
   let totalSymbols = 0;
   let mapped = 0;
 
-  function processMember(
-    member: SymbolEntry,
-    parentFQN: string,
-  ): void {
+  function processMember(member: SymbolEntry, parentFQN: string): void {
     const memberFQN = `${parentFQN}::${member.name}`;
     const memberId = computeSymbolId(member);
     totalSymbols++;
@@ -185,7 +185,7 @@ async function main() {
     mappings: Object.fromEntries(mappings),
   };
 
-  await Bun.write(OUTPUT_PATH, JSON.stringify(output, null, 2));
+  await writeFile(OUTPUT_PATH, JSON.stringify(output, null, 2));
   console.log(
     `\nDone! ${mapped}/${totalSymbols} symbols mapped (${((mapped / totalSymbols) * 100).toFixed(1)}%)`,
   );

@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { extractHeaderSynopses } from "../src/latex";
-import { resolveLaTeXInText } from "../src/cxx/latex";
+import { expect, test } from "vitest";
+import { extractHeaderSynopses } from "../src/latex.ts";
+import { resolveLaTeXInText } from "../src/cxx/latex.ts";
 
 test("extracts the first synopsis and prepends required includes", () => {
   const texFiles = new Map([

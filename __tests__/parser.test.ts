@@ -1,6 +1,6 @@
-import { expect, test } from "bun:test";
-import { Lexer } from "../src/cxx/lexer";
-import { Parser } from "../src/cxx/parser";
+import { expect, test } from "vitest";
+import { Lexer } from "../src/cxx/lexer.ts";
+import { Parser } from "../src/cxx/parser.ts";
 
 test("ctor disambiguation failed should die", () => {
   const code = `

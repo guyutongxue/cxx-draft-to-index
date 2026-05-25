@@ -1,9 +1,11 @@
-import type { HeaderIndex, IndexOutput, SymbolEntry } from "./share/types";
-import { loadAllTexFiles, extractHeaderSynopses } from "./latex";
-import { preprocessHeader, parseCodeblock } from "./cxx";
-import { mergeSymbols } from "./merge";
-import { topologicalSort } from "./sort";
+import type { HeaderIndex, IndexOutput, SymbolEntry } from "./share/types.ts";
+import { loadAllTexFiles, extractHeaderSynopses } from "./latex.ts";
+import { preprocessHeader, parseCodeblock } from "./cxx/index.ts";
+import { mergeSymbols } from "./merge.ts";
+import { topologicalSort } from "./sort.ts";
 import assert from "node:assert";
+import path from "node:path";
+import { writeFile } from "node:fs/promises";
 
 const OUTPUT_FILE = "dist/std-index.json";
 
@@ -37,7 +39,9 @@ async function main() {
     const headerSymbols: SymbolEntry[] = [];
     for (const block of [h.synopsis, ...h.classDefinitions]) {
       process.stdout.write(
-        block.isSynopsis ? `Parsing <${h.headerName}>` : `  Parsing ${block.sectionTitle}...`,
+        block.isSynopsis
+          ? `Parsing <${h.headerName}>`
+          : `  Parsing ${block.sectionTitle}...`,
       );
       const symbols = parseCodeblock(
         block.preprocessedCode,
@@ -50,9 +54,7 @@ async function main() {
     }
     console.log(`-> ${headerSymbols.length} symbols`);
     const mergedSymbols = mergeSymbols(headerSymbols);
-    console.log(
-      `Merged -> ${mergedSymbols.length} symbols`,
-    );
+    console.log(`Merged -> ${mergedSymbols.length} symbols`);
     assert(mergedSymbols.length <= headerSymbols.length);
     parsedHeaders.push({ header: h.headerName, symbols: mergedSymbols });
   }
@@ -63,11 +65,9 @@ async function main() {
     headers: parsedHeaders,
   };
 
-  const outputPath = import.meta.dir
-    ? Bun.file(import.meta.dir + "/../" + OUTPUT_FILE)
-    : Bun.file(OUTPUT_FILE);
+  const outputPath = path.join(import.meta.dirname, "..", OUTPUT_FILE);
 
-  await Bun.write(outputPath, JSON.stringify(output, null, 2));
+  await writeFile(outputPath, JSON.stringify(output, null, 2));
   const totalSymbols = output.headers.reduce(
     (sum, h) => sum + h.symbols.length,
     0,

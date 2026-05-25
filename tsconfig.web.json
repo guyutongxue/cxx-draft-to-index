@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "emitDeclarationOnly": true,
+    "module": "Preserve",
     "lib": [
       "ESNext",
       "DOM",
